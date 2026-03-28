@@ -1,0 +1,76 @@
+{
+  "entities": {
+    "client": {
+      "title": "Client",
+      "description": "A client who has purchased a mentorship.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique identifier for the client." },
+        "firstName": { "type": "string", "description": "Client's first name." },
+        "lastName": { "type": "string", "description": "Client's last name." },
+        "dni": { "type": "string", "description": "National ID (DNI)." },
+        "cuil": { "type": "string", "description": "Tax ID (CUIL)." },
+        "email": { "type": "string", "description": "Email address." },
+        "businessName": { "type": "string", "description": "Business or Reason Social." },
+        "address": { "type": "string", "description": "Home address." },
+        "city": { "type": "string", "description": "City." },
+        "province": { "type": "string", "description": "Province/State." },
+        "country": { "type": "string", "description": "Country." },
+        "installments": { "type": "number", "description": "Number of installments (1-6)." },
+        "totalAmountUSD": { "type": "number", "description": "Total mentorship amount in USD." },
+        "comments": { "type": "string", "description": "Additional notes." },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Creation timestamp." }
+      },
+      "required": ["firstName", "lastName", "totalAmountUSD", "installments"]
+    },
+    "payment": {
+      "title": "Payment",
+      "description": "A specific installment payment from a client.",
+      "type": "object",
+      "properties": {
+        "clientId": { "type": "string", "description": "Reference to the client." },
+        "installmentNumber": { "type": "number", "description": "Which installment this is." },
+        "amount": { "type": "number", "description": "Amount paid." },
+        "currency": { "type": "string", "enum": ["USD", "ARS"], "description": "Currency of the payment." },
+        "amountUSD": { "type": "number", "description": "Equivalent amount in USD at the time of payment." },
+        "exchangeRate": { "type": "number", "description": "Exchange rate used (ARS to USD)." },
+        "paymentDate": { "type": "string", "format": "date-time", "description": "Date the payment was made." },
+        "dueDate": { "type": "string", "format": "date-time", "description": "Due date for this installment." },
+        "paymentMethod": { "type": "string", "enum": ["Mercury", "Stripe", "Santander Argentina", "Belo Argentina"], "description": "Method used for payment." },
+        "status": { "type": "string", "enum": ["paid", "pending"], "description": "Status of the payment." },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Creation timestamp." }
+      },
+      "required": ["clientId", "amountUSD", "status"]
+    },
+    "cashflow": {
+      "title": "Cashflow Entry",
+      "description": "An income or expense entry for the business.",
+      "type": "object",
+      "properties": {
+        "type": { "type": "string", "enum": ["income", "expense"], "description": "Type of entry." },
+        "amountUSD": { "type": "number", "description": "Amount in USD." },
+        "category": { "type": "string", "description": "Category (e.g., Mentorship, Marketing, Software)." },
+        "date": { "type": "string", "format": "date-time", "description": "Date of the transaction." },
+        "description": { "type": "string", "description": "Details about the transaction." },
+        "paymentMethod": { "type": "string", "enum": ["Mercury", "Stripe", "Santander Argentina", "Belo Argentina"], "description": "Method used for payment." },
+        "paymentId": { "type": "string", "description": "Optional reference to a payment if it's an income." },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Creation timestamp." }
+      },
+      "required": ["type", "amountUSD", "date"]
+    }
+  },
+  "firestore": {
+    "/clients/{clientId}": {
+      "schema": "client",
+      "description": "Collection of clients."
+    },
+    "/payments/{paymentId}": {
+      "schema": "payment",
+      "description": "Collection of payments."
+    },
+    "/cashflow/{entryId}": {
+      "schema": "cashflow",
+      "description": "Collection of cashflow entries."
+    }
+  }
+}

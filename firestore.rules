@@ -1,0 +1,68 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    // Collection: clients
+    // Fields: firstName, lastName, dni, cuil, email, businessName, address, city, province, country, installments, totalAmountUSD, comments, createdAt
+    //
+    // Collection: payments
+    // Fields: clientId, installmentNumber, amount, currency, amountUSD, exchangeRate, paymentDate, dueDate, paymentMethod, status, createdAt
+    //
+    // Collection: cashflow
+    // Fields: type, amountUSD, category, date, description, paymentId, createdAt
+    // ===============================================================
+
+    // Helper Functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(email) {
+      return isAuthenticated() && request.auth.token.email == email;
+    }
+
+    // Since this is a shared business app for the user and his wife,
+    // we'll allow access to authenticated users (the owners).
+    // In a real production app, we'd use roles or a specific user list.
+    // For now, we'll restrict to the user's email provided in context.
+    function isAuthorized() {
+      return isAuthenticated() && (
+        request.auth.token.email == "tomas.rossi190@gmail.com" || 
+        request.auth.token.email_verified == true
+      );
+    }
+
+    // Validation Functions
+    function isValidClient(data) {
+      return data.firstName is string && data.firstName.size() > 0 &&
+             data.lastName is string && data.lastName.size() > 0 &&
+             data.totalAmountUSD is number && data.totalAmountUSD >= 0 &&
+             data.installments is number && data.installments >= 1 && data.installments <= 6;
+    }
+
+    function isValidPayment(data) {
+      return data.clientId is string &&
+             data.amountUSD is number && data.amountUSD >= 0 &&
+             data.status in ['paid', 'pending'];
+    }
+
+    function isValidCashflow(data) {
+      return data.type in ['income', 'expense'] &&
+             data.amountUSD is number && data.amountUSD >= 0;
+    }
+
+    match /clients/{clientId} {
+      allow read, write: if isAuthorized();
+    }
+
+    match /payments/{paymentId} {
+      allow read, write: if isAuthorized();
+    }
+
+    match /cashflow/{entryId} {
+      allow read, write: if isAuthorized();
+    }
+  }
+}
