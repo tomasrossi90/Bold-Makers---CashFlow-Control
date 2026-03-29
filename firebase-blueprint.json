@@ -57,6 +57,35 @@
         "createdAt": { "type": "string", "format": "date-time", "description": "Creation timestamp." }
       },
       "required": ["type", "amountUSD", "date"]
+    },
+    "staff": {
+      "title": "Staff Member",
+      "description": "A consultant or employee of the firm.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique identifier for the staff member." },
+        "name": { "type": "string", "description": "Staff member's full name." },
+        "role": { "type": "string", "description": "Staff member's role." },
+        "email": { "type": "string", "description": "Email address." },
+        "baseSalaryUSD": { "type": "number", "description": "Base salary in USD." },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Creation timestamp." }
+      },
+      "required": ["name", "role", "baseSalaryUSD"]
+    },
+    "payroll": {
+      "title": "Payroll Payment",
+      "description": "A payment made to a staff member.",
+      "type": "object",
+      "properties": {
+        "staffId": { "type": "string", "description": "Reference to the staff member." },
+        "staffName": { "type": "string", "description": "Staff member's name." },
+        "amountUSD": { "type": "number", "description": "Amount paid in USD." },
+        "date": { "type": "string", "format": "date-time", "description": "Date of payment." },
+        "period": { "type": "string", "description": "Payment period (e.g., March 2026)." },
+        "paymentMethod": { "type": "string", "enum": ["Mercury", "Stripe", "Santander Argentina", "Belo Argentina"], "description": "Method used for payment." },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Creation timestamp." }
+      },
+      "required": ["staffId", "amountUSD", "date", "period", "paymentMethod"]
     }
   },
   "firestore": {
@@ -71,6 +100,14 @@
     "/cashflow/{entryId}": {
       "schema": "cashflow",
       "description": "Collection of cashflow entries."
+    },
+    "/staff/{staffId}": {
+      "schema": "staff",
+      "description": "Collection of staff members."
+    },
+    "/payroll/{payrollId}": {
+      "schema": "payroll",
+      "description": "Collection of payroll payments."
     }
   }
 }

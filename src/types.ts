@@ -19,6 +19,7 @@ export interface Client {
   totalAmountUSD: number;
   comments?: string;
   createdAt: string;
+  deletedAt?: string;
 }
 
 export interface Payment {
@@ -29,12 +30,14 @@ export interface Payment {
   amount: number;
   currency: Currency;
   amountUSD: number;
+  paidAmountUSD?: number; // New: for partial payments/advances
   exchangeRate?: number;
   paymentDate?: string;
   dueDate: string;
   paymentMethod?: PaymentMethod;
   status: PaymentStatus;
   createdAt: string;
+  deletedAt?: string;
 }
 
 export interface CashflowEntry {
@@ -46,5 +49,27 @@ export interface CashflowEntry {
   description: string;
   paymentMethod?: PaymentMethod;
   paymentId?: string;
+  clientId?: string; // New: link to client
+  createdAt: string;
+}
+
+export interface StaffMember {
+  id?: string;
+  name: string;
+  role: string;
+  email?: string;
+  baseSalaryUSD: number;
+  createdAt: string;
+  deletedAt?: string;
+}
+
+export interface PayrollPayment {
+  id?: string;
+  staffId: string;
+  staffName: string;
+  amountUSD: number;
+  date: string;
+  period: string; // e.g., "March 2026"
+  paymentMethod: PaymentMethod;
   createdAt: string;
 }

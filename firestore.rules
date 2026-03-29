@@ -12,6 +12,12 @@ service cloud.firestore {
     //
     // Collection: cashflow
     // Fields: type, amountUSD, category, date, description, paymentId, createdAt
+    //
+    // Collection: staff
+    // Fields: name, role, email, baseSalaryUSD, createdAt
+    //
+    // Collection: payroll
+    // Fields: staffId, staffName, amountUSD, date, period, paymentMethod, createdAt
     // ===============================================================
 
     // Helper Functions
@@ -29,8 +35,7 @@ service cloud.firestore {
     // For now, we'll restrict to the user's email provided in context.
     function isAuthorized() {
       return isAuthenticated() && (
-        request.auth.token.email == "tomas.rossi190@gmail.com" || 
-        request.auth.token.email_verified == true
+        request.auth.token.email == "tomas.rossi190@gmail.com"
       );
     }
 
@@ -62,6 +67,14 @@ service cloud.firestore {
     }
 
     match /cashflow/{entryId} {
+      allow read, write: if isAuthorized();
+    }
+
+    match /staff/{staffId} {
+      allow read, write: if isAuthorized();
+    }
+
+    match /payroll/{payrollId} {
       allow read, write: if isAuthorized();
     }
   }
