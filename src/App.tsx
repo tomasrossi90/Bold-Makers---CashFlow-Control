@@ -14,11 +14,12 @@ import {
   query, 
   orderBy, 
   serverTimestamp,
-  Timestamp
+  Timestamp,
+  setDoc
 } from 'firebase/firestore';
 import { onAuthStateChanged, User } from 'firebase/auth';
 import { db, auth, loginWithGoogle, logout } from './firebase';
-import { Client, Payment, CashflowEntry, Currency, PaymentStatus, PaymentMethod, CashflowType, StaffMember, PayrollPayment } from './types';
+import { Client, Payment, CashflowEntry, Currency, PaymentStatus, PaymentMethod, CashflowType, StaffMember, PayrollPayment, AppSettings } from './types';
 import { 
   Users, 
   CreditCard, 
@@ -33,6 +34,7 @@ import {
   LogOut, 
   LogIn, 
   ChevronRight, 
+  ChevronLeft,
   DollarSign, 
   ArrowUpRight, 
   ArrowDownRight,
@@ -42,7 +44,10 @@ import {
   CheckCircle,
   Clock,
   AlertCircle,
-  X
+  X,
+  Settings,
+  Moon,
+  Sun
 } from 'lucide-react';
 import { 
   format, 
@@ -86,6 +91,26 @@ function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
+const formatUSD = (val: number) => Math.round(val || 0).toLocaleString();
+
+// --- Context ---
+export const SettingsContext = React.createContext<AppSettings | null>(null);
+
+const useCurrency = () => {
+  const settings = React.useContext(SettingsContext);
+  if (!settings) return (val: number) => `$${(val || 0).toLocaleString()}`;
+  
+  return (val: number) => {
+    const symbols = { 'USD': '$', 'ARS': '$', 'EUR': '€' };
+    const symbol = symbols[settings.currency] || '$';
+    const formatted = (val || 0).toLocaleString(undefined, {
+      minimumFractionDigits: settings.decimals,
+      maximumFractionDigits: settings.decimals
+    });
+    return `${symbol}${formatted}`;
+  };
+};
+
 // --- Components ---
 
 const Button = ({ 
@@ -95,11 +120,11 @@ const Button = ({
   ...props 
 }: React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: 'primary' | 'secondary' | 'danger' | 'ghost' | 'tertiary' }) => {
   const variants = {
-    primary: 'bg-primary text-white hover:opacity-90',
-    secondary: 'bg-neutral text-primary border border-gray-200 hover:bg-gray-100',
+    primary: 'bg-primary text-white hover:opacity-90 dark:bg-secondary dark:text-primary',
+    secondary: 'bg-neutral text-primary border border-gray-200 hover:bg-gray-100 dark:bg-slate-800 dark:text-white dark:border-slate-700',
     tertiary: 'bg-tertiary text-primary hover:opacity-90',
     danger: 'bg-red-600 text-white hover:bg-red-700',
-    ghost: 'bg-transparent text-primary hover:bg-gray-100'
+    ghost: 'bg-transparent text-primary hover:bg-gray-100 dark:text-white dark:hover:bg-slate-800'
   };
   return (
     <button 
@@ -119,10 +144,10 @@ const Card = ({ children, className, ...props }: { children: React.ReactNode; cl
 
 const Input = ({ label, ...props }: React.InputHTMLAttributes<HTMLInputElement> & { label?: string }) => (
   <div className="space-y-1.5">
-    {label && <label className="text-xs font-bold text-primary/60 uppercase tracking-wider ml-1">{label}</label>}
+    {label && <label className="text-xs font-bold text-primary/60 dark:text-secondary/60 uppercase tracking-wider ml-1">{label}</label>}
     <div className="relative">
       <input 
-        className="w-full px-4 py-3 bg-neutral/50 border border-white/50 rounded-[16px] focus:ring-2 focus:ring-secondary/50 focus:border-secondary outline-none transition-all text-primary placeholder:text-primary/30" 
+        className="w-full px-4 py-3 bg-neutral/50 dark:bg-slate-800/50 border border-white/50 dark:border-slate-700 rounded-[16px] focus:ring-2 focus:ring-secondary/50 focus:border-secondary outline-none transition-all text-primary dark:text-white placeholder:text-primary/30" 
         {...props} 
       />
     </div>
@@ -131,12 +156,12 @@ const Input = ({ label, ...props }: React.InputHTMLAttributes<HTMLInputElement> 
 
 const Select = ({ label, options, ...props }: React.SelectHTMLAttributes<HTMLSelectElement> & { label?: string; options: { value: string; label: string }[] }) => (
   <div className="space-y-1.5">
-    {label && <label className="text-xs font-bold text-primary/60 uppercase tracking-wider ml-1">{label}</label>}
+    {label && <label className="text-xs font-bold text-primary/60 dark:text-secondary/60 uppercase tracking-wider ml-1">{label}</label>}
     <select 
-      className="w-full px-4 py-3 bg-neutral/50 border border-white/50 rounded-[16px] focus:ring-2 focus:ring-secondary/50 focus:border-secondary outline-none transition-all text-primary appearance-none" 
+      className="w-full px-4 py-3 bg-neutral/50 dark:bg-slate-800/50 border border-white/50 dark:border-slate-700 rounded-[16px] focus:ring-2 focus:ring-secondary/50 focus:border-secondary outline-none transition-all text-primary dark:text-white appearance-none" 
       {...props}
     >
-      {options.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+      {options.map(opt => <option key={opt.value} value={opt.value} className="dark:bg-slate-800">{opt.label}</option>)}
     </select>
   </div>
 );
@@ -146,17 +171,40 @@ const Select = ({ label, options, ...props }: React.SelectHTMLAttributes<HTMLSel
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'clients' | 'payments' | 'cashflow' | 'payroll' | 'trash' | 'reports'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'clients' | 'payments' | 'cashflow' | 'payroll' | 'trash' | 'reports' | 'settings'>('dashboard');
   const [showNotifications, setShowNotifications] = useState(false);
   const [isAddingClient, setIsAddingClient] = useState(false);
   const [isAddingCashflow, setIsAddingCashflow] = useState(false);
   const [isAddingStaff, setIsAddingStaff] = useState(false);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   
+  const [settings, setSettings] = useState<AppSettings>({
+    currency: 'USD',
+    decimals: 0,
+    theme: 'light',
+    paymentMethods: ['Mercury', 'Stripe', 'Santander Argentina', 'Belo Argentina'],
+    updatedAt: new Date().toISOString()
+  });
+
   const [clients, setClients] = useState<Client[]>([]);
   const [payments, setPayments] = useState<Payment[]>([]);
   const [cashflow, setCashflow] = useState<CashflowEntry[]>([]);
   const [staff, setStaff] = useState<StaffMember[]>([]);
   const [payroll, setPayroll] = useState<PayrollPayment[]>([]);
+
+  const formatCurrency = (val: number) => {
+    const symbols = {
+      'USD': '$',
+      'ARS': '$',
+      'EUR': '€'
+    };
+    const symbol = symbols[settings.currency] || '$';
+    const formatted = (val || 0).toLocaleString(undefined, {
+      minimumFractionDigits: settings.decimals,
+      maximumFractionDigits: settings.decimals
+    });
+    return `${symbol}${formatted}`;
+  };
 
   const activeClients = useMemo(() => clients.filter(c => !c.deletedAt), [clients]);
   const deletedClients = useMemo(() => clients.filter(c => c.deletedAt), [clients]);
@@ -231,18 +279,55 @@ export default function App() {
       setPayroll(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as PayrollPayment)));
     });
 
+    const unsubSettings = onSnapshot(doc(db, 'settings', user.uid), (snap) => {
+      if (snap.exists()) {
+        setSettings(snap.data() as AppSettings);
+      }
+    });
+
     return () => {
       unsubClients();
       unsubPayments();
       unsubCashflow();
       unsubStaff();
       unsubPayroll();
+      unsubSettings();
     };
   }, [user]);
 
+  useEffect(() => {
+    const applyTheme = () => {
+      let isDark = false;
+      if (settings.theme === 'dark') {
+        isDark = true;
+      } else if (settings.theme === 'auto') {
+        const hour = new Date().getHours();
+        isDark = hour >= 19 || hour < 7;
+      }
+      
+      if (isDark) {
+        document.documentElement.classList.add('dark');
+      } else {
+        document.documentElement.classList.remove('dark');
+      }
+    };
+
+    applyTheme();
+    
+    // For auto mode, check every minute
+    let interval: any;
+    if (settings.theme === 'auto') {
+      interval = setInterval(applyTheme, 60000);
+    }
+    
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [settings.theme]);
+
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-neutral">
+      <div className="min-h-screen flex items-center justify-center bg-white dark:bg-neutral-dark">
         <div className="flex flex-col items-center gap-6">
           <div className="w-20 h-20 bg-primary rounded-[24px] flex items-center justify-center shadow-2xl shadow-primary/20 animate-pulse">
             <TrendingUp className="w-10 h-10 text-tertiary" />
@@ -262,7 +347,7 @@ export default function App() {
 
   if (!user) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-neutral p-6">
+      <div className="min-h-screen flex items-center justify-center bg-white dark:bg-neutral-dark p-6">
         <Card className="max-w-md w-full p-12 text-center space-y-10 bento-card border-none shadow-2xl shadow-primary/10">
           <div className="w-24 h-24 bg-primary rounded-[32px] flex items-center justify-center mx-auto shadow-2xl shadow-primary/20 rotate-6 transition-transform hover:rotate-0 duration-500">
             <TrendingUp className="w-12 h-12 text-tertiary" />
@@ -291,85 +376,112 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-neutral flex flex-col md:flex-row">
+    <SettingsContext.Provider value={settings}>
+      <div className="min-h-screen bg-white dark:bg-slate-900 transition-colors duration-500 flex flex-col md:flex-row">
       {/* Sidebar */}
-      <aside className="w-full md:w-72 bg-white flex flex-col border-r border-slate-100 z-20">
-        <div className="p-8 flex flex-col gap-1">
+      <aside className={cn(
+        "bg-white dark:bg-slate-900 flex flex-col border-r border-slate-100 dark:border-slate-800 z-20 transition-all duration-300 relative",
+        isSidebarCollapsed ? "w-20" : "w-full md:w-72"
+      )}>
+        <button 
+          onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
+          className="absolute -right-3 top-24 w-6 h-6 bg-white dark:bg-slate-800 border border-slate-100 dark:border-slate-700 rounded-full flex items-center justify-center text-slate-400 hover:text-primary shadow-sm z-30 hidden md:flex"
+        >
+          {isSidebarCollapsed ? <ChevronRight className="w-3 h-3" /> : <ChevronLeft className="w-3 h-3" />}
+        </button>
+
+        <div className={cn("p-8 flex flex-col gap-1", isSidebarCollapsed && "items-center px-4")}>
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-primary rounded-xl flex items-center justify-center shadow-lg shadow-primary/20">
+            <div className="w-10 h-10 bg-primary rounded-xl flex items-center justify-center shadow-lg shadow-primary/20 shrink-0">
               <TrendingUp className="w-6 h-6 text-white" />
             </div>
-            <div className="flex flex-col">
-              <span className="text-xl font-black text-primary tracking-tighter leading-none">Bold Makers</span>
-              <span className="text-[10px] font-bold text-muted tracking-widest uppercase">CASHFLOW CONTROL</span>
-            </div>
+            {!isSidebarCollapsed && (
+              <div className="flex flex-col animate-in fade-in duration-300">
+                <span className="text-xl font-black text-primary tracking-tighter leading-none">Bold Makers</span>
+                <span className="text-[10px] font-bold text-muted tracking-widest uppercase">CASHFLOW CONTROL</span>
+              </div>
+            )}
           </div>
         </div>
         
-        <nav className="flex-1 p-6 space-y-2">
+        <nav className={cn("flex-1 p-6 space-y-2", isSidebarCollapsed && "px-4")}>
           <NavItem 
             active={activeTab === 'dashboard'} 
             onClick={() => setActiveTab('dashboard')}
             icon={<TrendingUp className="w-5 h-5" />}
             label="Dashboard"
+            collapsed={isSidebarCollapsed}
           />
           <NavItem 
             active={activeTab === 'clients'} 
             onClick={() => setActiveTab('clients')}
             icon={<Users className="w-5 h-5" />}
             label="Clientes"
+            collapsed={isSidebarCollapsed}
           />
           <NavItem 
             active={activeTab === 'payments'} 
             onClick={() => setActiveTab('payments')}
             icon={<CreditCard className="w-5 h-5" />}
             label="Pagos"
+            collapsed={isSidebarCollapsed}
           />
           <NavItem 
             active={activeTab === 'cashflow'} 
             onClick={() => setActiveTab('cashflow')}
             icon={<DollarSign className="w-5 h-5" />}
             label="Transacciones"
+            collapsed={isSidebarCollapsed}
           />
           <NavItem 
             active={activeTab === 'payroll'} 
             onClick={() => setActiveTab('payroll')}
             icon={<Users className="w-5 h-5" />}
             label="Payroll"
+            collapsed={isSidebarCollapsed}
           />
           <NavItem 
             active={activeTab === 'trash'} 
             onClick={() => setActiveTab('trash')}
             icon={<Trash2 className="w-5 h-5" />}
             label="Papelera"
+            collapsed={isSidebarCollapsed}
           />
           <NavItem 
             active={activeTab === 'reports'} 
             onClick={() => setActiveTab('reports')}
             icon={<Filter className="w-5 h-5" />}
             label="Reportes"
+            collapsed={isSidebarCollapsed}
           />
         </nav>
 
-        <div className="p-6 mt-auto">
-          <div className="pt-4 border-t border-slate-100 space-y-1">
-            <button className="w-full flex items-center gap-3 px-4 py-2 text-sm font-medium text-muted hover:text-primary transition-colors">
-              <Filter className="w-4 h-4" />
-              Ajustes
+        <div className={cn("p-6 mt-auto", isSidebarCollapsed && "px-4")}>
+          <div className="pt-4 border-t border-slate-100 dark:border-slate-800 space-y-1">
+            <button 
+              onClick={() => setActiveTab('settings')}
+              className={cn(
+                "w-full flex items-center gap-3 px-4 py-2 text-sm font-medium transition-colors", 
+                activeTab === 'settings' ? "text-primary bg-slate-50 dark:bg-slate-800/50 rounded-lg" : "text-muted hover:text-primary",
+                isSidebarCollapsed && "justify-center px-0"
+              )}
+            >
+              <Settings className="w-4 h-4" />
+              {!isSidebarCollapsed && <span>Ajustes</span>}
             </button>
-            <button onClick={logout} className="w-full flex items-center gap-3 px-4 py-2 text-sm font-medium text-muted hover:text-red-600 transition-colors">
+            <button onClick={logout} className={cn("w-full flex items-center gap-3 px-4 py-2 text-sm font-medium text-muted hover:text-red-600 transition-colors", isSidebarCollapsed && "justify-center px-0")}>
               <LogOut className="w-4 h-4" />
-              Cerrar Sesión
+              {!isSidebarCollapsed && <span>Cerrar Sesión</span>}
             </button>
           </div>
         </div>
       </aside>
 
       {/* Main Content */}
-      <main className="flex-1 overflow-y-auto flex flex-col">
+      <main className="flex-1 overflow-y-auto flex flex-col bg-white dark:bg-slate-900">
         {/* Header */}
-        <header className="h-20 bg-white/80 backdrop-blur-md border-b border-slate-100 px-8 flex items-center justify-between sticky top-0 z-10">
-          <h1 className="text-xl font-bold text-slate-800">
+        <header className="h-20 bg-white/80 dark:bg-slate-900/80 backdrop-blur-md border-b border-slate-100 dark:border-slate-800 px-8 flex items-center justify-between sticky top-0 z-10">
+          <h1 className="text-xl font-bold text-slate-800 dark:text-slate-100">
             {activeTab === 'dashboard' && 'Resumen del Negocio'}
             {activeTab === 'clients' && 'Gestión de Clientes'}
             {activeTab === 'payments' && 'Control de Pagos'}
@@ -384,7 +496,7 @@ export default function App() {
               <input 
                 type="text" 
                 placeholder="Buscar transacción..." 
-                className="pl-10 pr-4 py-2 bg-slate-50 border border-slate-100 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 w-64"
+                className="pl-10 pr-4 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-700 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 w-64 dark:text-slate-200"
               />
             </div>
 
@@ -450,16 +562,16 @@ export default function App() {
               
               <div className="flex items-center gap-3 ml-2">
                 <div className="text-right hidden sm:block">
-                  <p className="text-sm font-bold text-slate-800 leading-none">{user.displayName}</p>
-                  <p className="text-[10px] font-medium text-slate-400 mt-1 uppercase">Socio Director</p>
+                  <p className="text-sm font-bold text-slate-800 dark:text-slate-100 leading-none">{user.displayName}</p>
+                  <p className="text-[10px] font-medium text-slate-400 dark:text-slate-500 mt-1 uppercase">Socio Director</p>
                 </div>
-                <img src={user.photoURL || ''} alt="" className="w-10 h-10 rounded-full border-2 border-slate-100" />
+                <img src={user.photoURL || ''} alt="" className="w-10 h-10 rounded-full border-2 border-slate-100 dark:border-slate-800" />
               </div>
             </div>
           </div>
         </header>
 
-        <div className="p-8">
+        <div className="p-8 bg-white dark:bg-slate-900">
           {activeTab === 'dashboard' && <DashboardView clients={activeClients} payments={activePayments} cashflow={cashflow} />}
           {activeTab === 'clients' && <ClientsView clients={activeClients} isAdding={isAddingClient} setIsAdding={setIsAddingClient} payments={payments} cashflow={cashflow} />}
           {activeTab === 'payments' && <PaymentsView clients={activeClients} payments={activePayments} />}
@@ -467,30 +579,34 @@ export default function App() {
           {activeTab === 'payroll' && <PayrollView staff={activeStaff} payroll={payroll} isAddingStaff={isAddingStaff} setIsAddingStaff={setIsAddingStaff} />}
           {activeTab === 'trash' && <TrashView clients={deletedClients} payments={payments} />}
           {activeTab === 'reports' && <ReportsView cashflow={cashflow} clients={activeClients} payments={activePayments} />}
+          {activeTab === 'settings' && <SettingsView settings={settings} user={user!} />}
         </div>
       </main>
     </div>
+    </SettingsContext.Provider>
   );
 }
 
-function NavItem({ active, onClick, icon, label }: { active: boolean; onClick: () => void; icon: React.ReactNode; label: string }) {
+function NavItem({ active, onClick, icon, label, collapsed }: { active: boolean; onClick: () => void; icon: React.ReactNode; label: string; collapsed?: boolean }) {
   return (
     <button 
       onClick={onClick}
       className={cn(
-        "w-full flex items-center gap-4 px-4 py-3 rounded-xl text-sm font-semibold transition-all duration-300 group",
+        "w-full flex items-center gap-4 px-4 py-3 rounded-xl text-sm font-semibold transition-all duration-300 group relative",
         active 
           ? "bg-primary text-white shadow-lg shadow-primary/20" 
-          : "text-slate-400 hover:text-slate-600 hover:bg-slate-50"
+          : "text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800/50",
+        collapsed && "justify-center px-0"
       )}
+      title={collapsed ? label : undefined}
     >
       <div className={cn(
-        "transition-transform duration-300",
+        "transition-transform duration-300 shrink-0",
         active ? "scale-110" : "group-hover:scale-110"
       )}>
         {icon}
       </div>
-      <span>{label}</span>
+      {!collapsed && <span className="animate-in fade-in slide-in-from-left-2 duration-300">{label}</span>}
     </button>
   );
 }
@@ -498,12 +614,13 @@ function NavItem({ active, onClick, icon, label }: { active: boolean; onClick: (
 // --- Dashboard View ---
 
 function DashboardView({ clients, payments, cashflow }: { clients: Client[]; payments: Payment[]; cashflow: CashflowEntry[] }) {
+  const formatCurrency = useCurrency();
   const [segmentation, setSegmentation] = useState<'weekly' | 'monthly' | 'quarterly' | 'semiannually' | 'annually'>('monthly');
   const [chartType, setChartType] = useState<'area' | 'bar'>('bar');
   const [visibleMetrics, setVisibleMetrics] = useState({
     ingresos: true,
     egresos: true,
-    utilidad: true
+    profit: true
   });
 
   const currentMonth = startOfMonth(new Date());
@@ -577,7 +694,7 @@ function DashboardView({ clients, payments, cashflow }: { clients: Client[]; pay
         .filter(e => e.type === 'expense' && (isAfter(parseISO(e.date), p.start) || e.date === format(p.start, 'yyyy-MM-dd')) && (isBefore(parseISO(e.date), p.end) || e.date === format(p.end, 'yyyy-MM-dd')))
         .reduce((acc, e) => acc + e.amountUSD, 0);
 
-      return { name: p.label, ingresos: income, egresos: expenses, utilidad: income - expenses };
+      return { name: p.label, ingresos: income, egresos: expenses, profit: income - expenses };
     });
   }, [cashflow, segmentation]);
 
@@ -588,7 +705,7 @@ function DashboardView({ clients, payments, cashflow }: { clients: Client[]; pay
 
     return [
       { name: 'Egresos', value: Math.round(expensesPercent), color: '#ef4444', amount: stats.monthlyExpenses },
-      { name: 'Utilidad', value: Math.round(profitPercent), color: '#E8E981', amount: stats.profit }
+      { name: 'Profit', value: Math.round(profitPercent), color: '#E3E35F', amount: stats.profit }
     ];
   }, [stats]);
 
@@ -607,7 +724,7 @@ function DashboardView({ clients, payments, cashflow }: { clients: Client[]; pay
                   <span className="text-[11px] font-bold text-slate-600 uppercase tracking-tight">{entry.name}</span>
                 </div>
                 <span className="text-sm font-black text-primary">
-                  ${entry.value.toLocaleString()}
+                  {formatCurrency(entry.value)}
                 </span>
               </div>
             ))}
@@ -623,26 +740,26 @@ function DashboardView({ clients, payments, cashflow }: { clients: Client[]; pay
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
         <StatCard 
           label="Balance Total" 
-          value={`$${stats.totalRevenue.toLocaleString()}`} 
+          value={formatCurrency(stats.totalRevenue)} 
           icon={<CreditCard className="w-5 h-5" />}
           trend="+12.5%"
           color="primary"
         />
         <StatCard 
           label="Ingresos (Mensual)" 
-          value={`$${stats.monthlyIncome.toLocaleString()}`} 
+          value={formatCurrency(stats.monthlyIncome)} 
           icon={<TrendingUp className="w-5 h-5" />}
           color="secondary"
         />
         <StatCard 
           label="Egresos (Mensual)" 
-          value={`$${stats.monthlyExpenses.toLocaleString()}`} 
+          value={formatCurrency(stats.monthlyExpenses)} 
           icon={<TrendingDown className="w-5 h-5" />}
           color="red"
         />
         <StatCard 
-          label="Utilidad Operativa" 
-          value={`$${stats.profit.toLocaleString()}`} 
+          label="Profit" 
+          value={formatCurrency(stats.profit)} 
           icon={<Star className="w-6 h-6" />}
           color="tertiary"
         />
@@ -653,7 +770,7 @@ function DashboardView({ clients, payments, cashflow }: { clients: Client[]; pay
           <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-8 gap-4">
             <div>
               <h3 className="text-lg font-bold text-slate-800">Flujo de Caja</h3>
-              <p className="text-xs text-slate-400">Análisis de ingresos, egresos y utilidad</p>
+              <p className="text-xs text-slate-400">Análisis de ingresos, egresos y profit</p>
             </div>
             <div className="flex flex-wrap items-center gap-4">
               <div className="flex items-center gap-1 bg-slate-50 p-1 rounded-xl border border-slate-100">
@@ -704,7 +821,7 @@ function DashboardView({ clients, payments, cashflow }: { clients: Client[]; pay
                 {[
                   { id: 'ingresos', label: 'INGRESOS', color: 'bg-primary', border: 'border-primary/20', activeBg: 'bg-primary/5' },
                   { id: 'egresos', label: 'EGRESOS', color: 'bg-red-500', border: 'border-red-500/20', activeBg: 'bg-red-500/5' },
-                  { id: 'utilidad', label: 'UTILIDAD', color: 'bg-tertiary', border: 'border-tertiary/20', activeBg: 'bg-tertiary/5' }
+                  { id: 'profit', label: 'PROFIT', color: 'bg-tertiary', border: 'border-tertiary/20', activeBg: 'bg-tertiary/5' }
                 ].map((m) => (
                   <button 
                     key={m.id}
@@ -737,8 +854,8 @@ function DashboardView({ clients, payments, cashflow }: { clients: Client[]; pay
                       <stop offset="95%" stopColor="#ef4444" stopOpacity={0}/>
                     </linearGradient>
                     <linearGradient id="colorProfit" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#E8E981" stopOpacity={0.1}/>
-                      <stop offset="95%" stopColor="#E8E981" stopOpacity={0}/>
+                      <stop offset="5%" stopColor="#E3E35F" stopOpacity={0.1}/>
+                      <stop offset="95%" stopColor="#E3E35F" stopOpacity={0}/>
                     </linearGradient>
                   </defs>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
@@ -751,11 +868,11 @@ function DashboardView({ clients, payments, cashflow }: { clients: Client[]; pay
                   />
                   <YAxis hide />
                   <Tooltip content={<CustomTooltip />} />
-                  {visibleMetrics.utilidad && (
+                  {visibleMetrics.profit && (
                     <Area 
                       type="monotone" 
-                      dataKey="utilidad" 
-                      stroke="#E8E981" 
+                      dataKey="profit" 
+                      stroke="#E3E35F" 
                       strokeWidth={3}
                       fillOpacity={1} 
                       fill="url(#colorProfit)" 
@@ -813,13 +930,13 @@ function DashboardView({ clients, payments, cashflow }: { clients: Client[]; pay
                       barSize={16}
                     />
                   )}
-                  {visibleMetrics.utilidad && (
+                  {visibleMetrics.profit && (
                     <Line 
                       type="monotone" 
-                      dataKey="utilidad" 
-                      stroke="#E8E981" 
+                      dataKey="profit" 
+                      stroke="#E3E35F" 
                       strokeWidth={4}
-                      dot={{ r: 4, fill: '#E8E981', strokeWidth: 2, stroke: '#fff' }}
+                      dot={{ r: 4, fill: '#E3E35F', strokeWidth: 2, stroke: '#fff' }}
                       activeDot={{ r: 6, strokeWidth: 0 }}
                     />
                   )}
@@ -855,7 +972,7 @@ function DashboardView({ clients, payments, cashflow }: { clients: Client[]; pay
                       return (
                         <div className="bg-white p-3 rounded-xl shadow-xl border border-slate-50">
                           <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">{data.name}</p>
-                          <p className="text-sm font-black text-primary">${data.amount.toLocaleString()}</p>
+                          <p className="text-sm font-black text-primary">{formatCurrency(data.amount)}</p>
                         </div>
                       );
                     }
@@ -865,7 +982,7 @@ function DashboardView({ clients, payments, cashflow }: { clients: Client[]; pay
               </PieChart>
             </ResponsiveContainer>
             <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-              <span className="text-xl font-bold text-slate-800">${(stats.monthlyIncome / 1000).toFixed(1)}k</span>
+              <span className="text-xl font-bold text-slate-800">${(stats.monthlyIncome / 1000).toFixed(0)}k</span>
               <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">INGRESOS</span>
             </div>
           </div>
@@ -878,7 +995,7 @@ function DashboardView({ clients, payments, cashflow }: { clients: Client[]; pay
                 </div>
                 <div className="text-right">
                   <span className="text-xs font-bold text-slate-800 block">{item.value}%</span>
-                  <span className="text-[9px] font-bold text-slate-400 uppercase tracking-tighter">${item.amount.toLocaleString()}</span>
+                  <span className="text-[9px] font-bold text-slate-400 uppercase tracking-tighter">{formatCurrency(item.amount)}</span>
                 </div>
               </div>
             ))}
@@ -926,7 +1043,7 @@ function DashboardView({ clients, payments, cashflow }: { clients: Client[]; pay
                     "py-4 text-sm font-bold",
                     entry.type === 'income' ? "text-slate-800" : "text-red-500"
                   )}>
-                    {entry.type === 'expense' ? '-' : ''}${entry.amountUSD.toLocaleString()}
+                    {entry.type === 'expense' ? '-' : ''}{formatCurrency(entry.amountUSD)}
                   </td>
                   <td className="py-4">
                     <span className={cn(
@@ -955,25 +1072,40 @@ function StatCard({ label, value, icon, trend, color }: { label: string; value: 
   const colors = {
     secondary: 'bg-secondary/10 text-secondary',
     red: 'bg-red-50 text-red-600',
-    tertiary: 'bg-tertiary/20 text-primary',
+    tertiary: 'bg-tertiary text-slate-900 shadow-lg shadow-tertiary/20',
     primary: 'bg-primary/10 text-primary'
   };
   
   return (
-    <Card className="p-6 bento-card border-none">
+    <Card className={cn(
+      "p-6 bento-card border-none transition-all duration-300",
+      color === 'tertiary' ? "bg-tertiary shadow-xl shadow-tertiary/20" : "bg-white"
+    )}>
       <div className="flex items-start justify-between mb-4">
-        <div className={cn("w-10 h-10 rounded-lg flex items-center justify-center", colors[color])}>
+        <div className={cn(
+          "w-10 h-10 rounded-lg flex items-center justify-center", 
+          color === 'tertiary' ? "bg-white/20 text-slate-900" : colors[color]
+        )}>
           {icon}
         </div>
         {trend && (
-          <span className="text-[10px] font-bold text-green-500 bg-green-50 px-2 py-1 rounded-lg">
+          <span className={cn(
+            "text-[10px] font-bold px-2 py-1 rounded-lg",
+            color === 'tertiary' ? "text-slate-900 bg-white/20" : "text-green-500 bg-green-50"
+          )}>
             {trend}
           </span>
         )}
       </div>
       <div className="space-y-1">
-        <p className="text-xs font-medium text-slate-400">{label}</p>
-        <h3 className="text-2xl font-bold text-slate-800 tracking-tight">{value}</h3>
+        <p className={cn(
+          "text-xs font-medium",
+          color === 'tertiary' ? "text-slate-900/60" : "text-slate-400"
+        )}>{label}</p>
+        <h3 className={cn(
+          "text-2xl font-bold tracking-tight",
+          color === 'tertiary' ? "text-slate-900" : "text-slate-800"
+        )}>{value}</h3>
       </div>
     </Card>
   );
@@ -982,6 +1114,7 @@ function StatCard({ label, value, icon, trend, color }: { label: string; value: 
 // --- Clients View ---
 
 function ClientsView({ clients, isAdding, setIsAdding, payments, cashflow }: { clients: Client[]; isAdding: boolean; setIsAdding: (v: boolean) => void; payments: Payment[]; cashflow: CashflowEntry[] }) {
+  const formatCurrency = useCurrency();
   const [search, setSearch] = useState('');
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [editingClient, setEditingClient] = useState<Client | null>(null);
@@ -1149,7 +1282,7 @@ function ClientsView({ clients, isAdding, setIsAdding, payments, cashflow }: { c
               <div className="grid grid-cols-2 gap-6 py-6 border-y border-primary/5">
                 <div>
                   <p className="text-[10px] font-black uppercase tracking-widest text-primary/30">Monto Total</p>
-                  <p className="text-xl font-black text-primary tracking-tighter italic">${client.totalAmountUSD.toLocaleString()}</p>
+                  <p className="text-xl font-black text-primary tracking-tighter italic">{formatCurrency(client.totalAmountUSD)}</p>
                 </div>
                 <div>
                   <p className="text-[10px] font-black uppercase tracking-widest text-primary/30">Cuotas</p>
@@ -1193,7 +1326,7 @@ function ClientsView({ clients, isAdding, setIsAdding, payments, cashflow }: { c
                     <div className="text-right">
                       <p className="text-[9px] font-black uppercase tracking-widest text-primary/40 mb-1">Monto Cuota</p>
                       <p className="text-sm font-black text-secondary italic tracking-tight">
-                        ${nextPayment.amountUSD.toLocaleString()}
+                        {formatCurrency(nextPayment.amountUSD)}
                       </p>
                     </div>
                   </div>
@@ -1402,7 +1535,7 @@ function ClientsView({ clients, isAdding, setIsAdding, payments, cashflow }: { c
                         </div>
                       </div>
                       <div className="text-right">
-                        <p className="text-lg font-black text-primary italic tracking-tighter">${payment.amountUSD.toLocaleString()}</p>
+                        <p className="text-lg font-black text-primary italic tracking-tighter">{formatCurrency(payment.amountUSD)}</p>
                         <span className={cn(
                           "text-[9px] font-black uppercase tracking-widest px-2 py-1 rounded-full",
                           payment.status === 'paid' ? "bg-green-100 text-green-600" : "bg-amber-100 text-amber-600"
@@ -1443,7 +1576,7 @@ function ClientsView({ clients, isAdding, setIsAdding, payments, cashflow }: { c
                             "text-lg font-black italic tracking-tighter",
                             tx.type === 'income' ? "text-green-600" : "text-red-600"
                           )}>
-                            {tx.type === 'income' ? '+' : '-'}${tx.amountUSD.toLocaleString()}
+                            {tx.type === 'income' ? '+' : '-'}{formatCurrency(tx.amountUSD)}
                           </p>
                           <p className="text-[9px] font-bold text-primary/30 uppercase tracking-widest">{tx.paymentMethod}</p>
                         </div>
@@ -1464,6 +1597,8 @@ function ClientsView({ clients, isAdding, setIsAdding, payments, cashflow }: { c
 // --- Payments View ---
 
 function PaymentsView({ clients, payments }: { clients: Client[]; payments: Payment[] }) {
+  const settings = React.useContext(SettingsContext);
+  const formatCurrency = useCurrency();
   const [isPaying, setIsPaying] = useState<Payment | null>(null);
   const [arsRate, setArsRate] = useState(1200); // Default placeholder rate
   const [filterStatus, setFilterStatus] = useState<'all' | 'paid' | 'pending'>('all');
@@ -1601,10 +1736,10 @@ function PaymentsView({ clients, payments }: { clients: Client[]; payments: Paym
                       </div>
                     </td>
                   <td className="px-8 py-5 text-lg font-black text-primary tracking-tighter italic">
-                    ${payment.amountUSD.toLocaleString()}
+                    {formatCurrency(payment.amountUSD)}
                     {payment.paidAmountUSD && payment.paidAmountUSD < payment.amountUSD && (
                       <p className="text-[10px] text-secondary font-bold not-italic tracking-normal mt-1">
-                        Restante: ${(payment.amountUSD - payment.paidAmountUSD).toLocaleString()}
+                        Restante: {formatCurrency(payment.amountUSD - payment.paidAmountUSD)}
                       </p>
                     )}
                   </td>
@@ -1651,7 +1786,7 @@ function PaymentsView({ clients, payments }: { clients: Client[]; payments: Paym
               Cuota #{isPaying.installmentNumber} • {isPaying.clientName}
               {isPaying.paidAmountUSD && isPaying.paidAmountUSD > 0 && (
                 <span className="block text-secondary mt-1">
-                  Pagado: ${isPaying.paidAmountUSD.toLocaleString()} • Restante: ${(isPaying.amountUSD - isPaying.paidAmountUSD).toLocaleString()}
+                  Pagado: {formatCurrency(isPaying.paidAmountUSD)} • Restante: {formatCurrency(isPaying.amountUSD - isPaying.paidAmountUSD)}
                 </span>
               )}
             </p>
@@ -1691,10 +1826,8 @@ function PaymentsView({ clients, payments }: { clients: Client[]; payments: Paym
                 name="paymentMethod" 
                 required
                 options={[
-                  { value: 'Mercury', label: 'Mercury' },
-                  { value: 'Stripe', label: 'Stripe' },
-                  { value: 'Santander Argentina', label: 'Santander Argentina' },
-                  { value: 'Belo Argentina', label: 'Belo Argentina' }
+                  { value: '', label: 'Seleccionar...' },
+                  ...settings.paymentMethods.map(m => ({ value: m, label: m }))
                 ]} 
               />
 
@@ -1713,6 +1846,7 @@ function PaymentsView({ clients, payments }: { clients: Client[]; payments: Paym
 // --- Trash View ---
 
 function TrashView({ clients, payments }: { clients: Client[]; payments: Payment[] }) {
+  const formatCurrency = useCurrency();
   const [confirmPermDeleteId, setConfirmPermDeleteId] = useState<string | null>(null);
 
   const handleRestore = async (id: string) => {
@@ -1853,6 +1987,7 @@ function TrashView({ clients, payments }: { clients: Client[]; payments: Payment
 // --- Reports View ---
 
 function ReportsView({ cashflow, clients, payments }: { cashflow: CashflowEntry[]; clients: Client[]; payments: Payment[] }) {
+  const formatCurrency = useCurrency();
   const incomeByCategory = useMemo(() => {
     const categories: Record<string, number> = {};
     cashflow.filter(e => e.type === 'income').forEach(e => {
@@ -1886,7 +2021,7 @@ function ReportsView({ cashflow, clients, payments }: { cashflow: CashflowEntry[
     }).sort((a, b) => b.paid - a.paid);
   }, [clients, payments]);
 
-  const COLORS = ['#001C35', '#5E98D3', '#E8E981', '#F27D26', '#10b981', '#ef4444'];
+  const COLORS = ['#001C35', '#5E98D3', '#E3E35F', '#F27D26', '#10b981', '#ef4444'];
 
   return (
     <div className="space-y-10 animate-in fade-in slide-in-from-bottom-4 duration-700">
@@ -1974,9 +2109,9 @@ function ReportsView({ cashflow, clients, payments }: { cashflow: CashflowEntry[
                       <span className="text-[10px] font-black text-primary w-8">{item.progress.toFixed(0)}%</span>
                     </div>
                   </td>
-                  <td className="py-5 text-sm font-bold text-green-600">${item.paid.toLocaleString()}</td>
-                  <td className="py-5 text-sm font-bold text-amber-600">${item.pending.toLocaleString()}</td>
-                  <td className="py-5 text-sm font-black text-primary italic">${item.total.toLocaleString()}</td>
+                  <td className="py-5 text-sm font-bold text-green-600">{formatCurrency(item.paid)}</td>
+                  <td className="py-5 text-sm font-bold text-amber-600">{formatCurrency(item.pending)}</td>
+                  <td className="py-5 text-sm font-black text-primary italic">{formatCurrency(item.total)}</td>
                 </tr>
               ))}
             </tbody>
@@ -2002,6 +2137,8 @@ function CashflowView({
   clients: Client[];
   payments: Payment[];
 }) {
+  const settings = React.useContext(SettingsContext);
+  const formatCurrency = useCurrency();
   const [selectedClientId, setSelectedClientId] = useState<string>('');
   const [selectedPaymentId, setSelectedPaymentId] = useState<string>('');
   const [entryType, setEntryType] = useState<CashflowType>('income');
@@ -2233,18 +2370,18 @@ function CashflowView({
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <Card className="p-8 bento-card bg-white border-none shadow-xl shadow-primary/5">
           <p className="text-[10px] font-black text-primary/40 uppercase tracking-[0.2em] mb-2">Total Ingresos</p>
-          <p className="text-3xl font-black text-green-600 tracking-tighter italic">${totals.income.toLocaleString()}</p>
+          <p className="text-3xl font-black text-green-600 tracking-tighter italic">{formatCurrency(totals.income)}</p>
         </Card>
         <Card className="p-8 bento-card bg-white border-none shadow-xl shadow-primary/5">
           <p className="text-[10px] font-black text-primary/40 uppercase tracking-[0.2em] mb-2">Total Egresos</p>
-          <p className="text-3xl font-black text-red-600 tracking-tighter italic">${totals.expense.toLocaleString()}</p>
+          <p className="text-3xl font-black text-red-600 tracking-tighter italic">{formatCurrency(totals.expense)}</p>
         </Card>
         <Card className={cn(
           "p-8 bento-card border-none shadow-xl shadow-primary/5",
           balance >= 0 ? "bg-primary text-white" : "bg-red-600 text-white"
         )}>
           <p className="text-[10px] font-black opacity-60 uppercase tracking-[0.2em] mb-2">Saldo Neto</p>
-          <p className="text-3xl font-black tracking-tighter italic">${balance.toLocaleString()}</p>
+          <p className="text-3xl font-black tracking-tighter italic">{formatCurrency(balance)}</p>
         </Card>
       </div>
 
@@ -2278,7 +2415,7 @@ function CashflowView({
                 "text-2xl font-black tracking-tighter italic",
                 entry.type === 'income' ? "text-green-600" : "text-red-600"
               )}>
-                {entry.type === 'income' ? '+' : '-'}${entry.amountUSD.toLocaleString()}
+                {entry.type === 'income' ? '+' : '-'}{formatCurrency(entry.amountUSD)}
               </p>
               <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                 <button 
@@ -2373,7 +2510,7 @@ function CashflowView({
                         { value: '', label: 'Seleccionar cuota...' },
                         ...clientPayments.map(p => ({ 
                           value: p.id!, 
-                          label: `Cuota #${p.installmentNumber} - Restante: $${(p.amountUSD - (p.paidAmountUSD || 0)).toLocaleString()}` 
+                          label: `Cuota #${p.installmentNumber} - Restante: ${formatCurrency(p.amountUSD - (p.paidAmountUSD || 0))}` 
                         }))
                       ]} 
                     />
@@ -2390,10 +2527,8 @@ function CashflowView({
                 name="paymentMethod" 
                 required
                 options={[
-                  { value: 'Mercury', label: 'Mercury' },
-                  { value: 'Stripe', label: 'Stripe' },
-                  { value: 'Santander Argentina', label: 'Santander Argentina' },
-                  { value: 'Belo Argentina', label: 'Belo Argentina' }
+                  { value: '', label: 'Seleccionar...' },
+                  ...settings.paymentMethods.map(m => ({ value: m, label: m }))
                 ]} 
               />
               
@@ -2437,10 +2572,8 @@ function CashflowView({
                 defaultValue={editingEntry.paymentMethod}
                 required
                 options={[
-                  { value: 'Mercury', label: 'Mercury' },
-                  { value: 'Stripe', label: 'Stripe' },
-                  { value: 'Santander Argentina', label: 'Santander Argentina' },
-                  { value: 'Belo Argentina', label: 'Belo Argentina' }
+                  { value: '', label: 'Seleccionar...' },
+                  ...settings.paymentMethods.map(m => ({ value: m, label: m }))
                 ]} 
               />
               
@@ -2469,6 +2602,8 @@ function PayrollView({
   isAddingStaff: boolean;
   setIsAddingStaff: (v: boolean) => void;
 }) {
+  const settings = React.useContext(SettingsContext);
+  const formatCurrency = useCurrency();
   const [isPayingStaff, setIsPayingStaff] = useState<StaffMember | null>(null);
   const [isDeletingStaffId, setIsDeletingStaffId] = useState<string | null>(null);
 
@@ -2572,7 +2707,7 @@ function PayrollView({
                 <div className="flex items-center gap-6">
                   <div className="text-right">
                     <p className="text-[10px] font-black text-primary/40 uppercase tracking-widest">Sueldo Base</p>
-                    <p className="text-lg font-black text-primary italic">${s.baseSalaryUSD.toLocaleString()}</p>
+                    <p className="text-lg font-black text-primary italic">{formatCurrency(s.baseSalaryUSD)}</p>
                   </div>
                   <div className="flex items-center gap-2">
                     <Button variant="secondary" className="py-2 px-4 text-xs" onClick={() => setIsPayingStaff(s)}>
@@ -2606,7 +2741,7 @@ function PayrollView({
                     <p className="text-xs font-black text-primary tracking-tight">{p.staffName}</p>
                     <p className="text-[9px] font-bold text-primary/40 uppercase">{p.period}</p>
                   </div>
-                  <p className="text-sm font-black text-red-600 italic">-${p.amountUSD.toLocaleString()}</p>
+                  <p className="text-sm font-black text-red-600 italic">-{formatCurrency(p.amountUSD)}</p>
                 </div>
                 <div className="flex items-center justify-between mt-2">
                   <span className="text-[8px] font-black text-secondary uppercase tracking-widest">{p.paymentMethod}</span>
@@ -2667,10 +2802,8 @@ function PayrollView({
                 name="paymentMethod" 
                 required
                 options={[
-                  { value: 'Mercury', label: 'Mercury' },
-                  { value: 'Stripe', label: 'Stripe' },
-                  { value: 'Santander Argentina', label: 'Santander Argentina' },
-                  { value: 'Belo Argentina', label: 'Belo Argentina' }
+                  { value: '', label: 'Seleccionar...' },
+                  ...settings.paymentMethods.map(m => ({ value: m, label: m }))
                 ]} 
               />
               <div className="flex justify-end gap-4 pt-4">
@@ -2681,6 +2814,245 @@ function PayrollView({
           </Card>
         </div>
       )}
+    </div>
+  );
+}
+
+function SettingsView({ settings, user }: { settings: AppSettings; user: User }) {
+  const [localSettings, setLocalSettings] = useState(settings);
+  const [newPaymentMethod, setNewPaymentMethod] = useState('');
+  const [isSaving, setIsSaving] = useState(false);
+  const [showSuccess, setShowSuccess] = useState(false);
+
+  // Sync with external changes
+  useEffect(() => {
+    setLocalSettings(settings);
+  }, [settings]);
+
+  const saveSettings = async () => {
+    setIsSaving(true);
+    setShowSuccess(false);
+    try {
+      await setDoc(doc(db, 'settings', user.uid), {
+        ...localSettings,
+        updatedAt: new Date().toISOString()
+      });
+      setShowSuccess(true);
+      setTimeout(() => setShowSuccess(false), 3000);
+    } catch (error) {
+      console.error('Error saving settings:', error);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const updateField = (field: keyof AppSettings, value: any) => {
+    setLocalSettings(prev => ({ ...prev, [field]: value }));
+  };
+
+  const addPaymentMethod = () => {
+    if (!newPaymentMethod.trim()) return;
+    setLocalSettings(prev => ({
+      ...prev,
+      paymentMethods: [...prev.paymentMethods, newPaymentMethod.trim()]
+    }));
+    setNewPaymentMethod('');
+  };
+
+  const removePaymentMethod = (method: string) => {
+    setLocalSettings(prev => ({
+      ...prev,
+      paymentMethods: prev.paymentMethods.filter(m => m !== method)
+    }));
+  };
+
+  const hasChanges = JSON.stringify(localSettings) !== JSON.stringify(settings);
+
+  return (
+    <div className="max-w-4xl mx-auto space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-700">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-2xl font-black text-primary dark:text-secondary tracking-tighter italic">Ajustes del Sistema</h2>
+          <p className="text-slate-400 text-sm">Configura las preferencias de tu espacio de trabajo.</p>
+        </div>
+        
+        <div className="flex items-center gap-4">
+          {showSuccess && (
+            <div className="flex items-center gap-2 text-green-500 font-bold text-sm animate-in fade-in slide-in-from-right-4">
+              <Check className="w-4 h-4" />
+              <span>¡Cambios guardados!</span>
+            </div>
+          )}
+          <Button 
+            onClick={saveSettings} 
+            disabled={!hasChanges || isSaving}
+            className={cn(
+              "px-8 py-3 shadow-xl transition-all",
+              hasChanges ? "shadow-primary/20 scale-105" : "opacity-50 grayscale"
+            )}
+          >
+            {isSaving ? 'Guardando...' : 'Guardar Cambios'}
+          </Button>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+        {/* General Settings */}
+        <Card className="p-8 bento-card border-none space-y-6">
+          <div className="flex items-center gap-3 mb-2">
+            <div className="w-8 h-8 bg-primary/10 rounded-lg flex items-center justify-center text-primary">
+              <DollarSign className="w-4 h-4" />
+            </div>
+            <h3 className="font-bold text-slate-800 dark:text-white">Moneda y Formato</h3>
+          </div>
+
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Moneda Principal</label>
+              <div className="flex gap-2">
+                {(['USD', 'ARS', 'EUR'] as Currency[]).map(c => (
+                  <button
+                    key={c}
+                    onClick={() => updateField('currency', c)}
+                    className={cn(
+                      "flex-1 py-3 rounded-xl text-sm font-bold transition-all border",
+                      localSettings.currency === c 
+                        ? "bg-primary text-white border-primary shadow-lg shadow-primary/20" 
+                        : "bg-white dark:bg-slate-800 text-slate-400 border-slate-100 dark:border-slate-700 hover:border-slate-200"
+                    )}
+                  >
+                    {c}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Decimales a mostrar</label>
+              <div className="flex gap-2">
+                {[0, 1, 2].map(d => (
+                  <button
+                    key={d}
+                    onClick={() => updateField('decimals', d)}
+                    className={cn(
+                      "flex-1 py-3 rounded-xl text-sm font-bold transition-all border",
+                      localSettings.decimals === d 
+                        ? "bg-primary text-white border-primary shadow-lg shadow-primary/20" 
+                        : "bg-white dark:bg-slate-800 text-slate-400 border-slate-100 dark:border-slate-700 hover:border-slate-200"
+                    )}
+                  >
+                    {d} {d === 1 ? 'Decimal' : 'Decimales'}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        </Card>
+
+        {/* Appearance */}
+        <Card className="p-8 bento-card border-none space-y-6">
+          <div className="flex items-center gap-3 mb-2">
+            <div className="w-8 h-8 bg-secondary/10 rounded-lg flex items-center justify-center text-secondary">
+              <Sun className="w-4 h-4" />
+            </div>
+            <h3 className="font-bold text-slate-800 dark:text-white">Apariencia</h3>
+          </div>
+
+          <div className="space-y-2">
+            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Tema Visual</label>
+            <div className="flex flex-col gap-2">
+              <div className="flex gap-2">
+                <button
+                  onClick={() => updateField('theme', 'light')}
+                  className={cn(
+                    "flex-1 flex items-center justify-center gap-3 py-4 rounded-xl text-sm font-bold transition-all border",
+                    localSettings.theme === 'light' 
+                      ? "bg-primary text-white border-primary shadow-lg shadow-primary/20" 
+                      : "bg-white dark:bg-slate-800 text-slate-400 border-slate-100 dark:border-slate-700 hover:border-slate-200"
+                  )}
+                >
+                  <Sun className="w-4 h-4" />
+                  Light
+                </button>
+                <button
+                  onClick={() => updateField('theme', 'dark')}
+                  className={cn(
+                    "flex-1 flex items-center justify-center gap-3 py-4 rounded-xl text-sm font-bold transition-all border",
+                    localSettings.theme === 'dark' 
+                      ? "bg-primary text-white border-primary shadow-lg shadow-primary/20" 
+                      : "bg-white dark:bg-slate-800 text-slate-400 border-slate-100 dark:border-slate-700 hover:border-slate-200"
+                  )}
+                >
+                  <Moon className="w-4 h-4" />
+                  Dark
+                </button>
+              </div>
+              <button
+                onClick={() => updateField('theme', 'auto')}
+                className={cn(
+                  "w-full flex items-center justify-center gap-3 py-4 rounded-xl text-sm font-bold transition-all border",
+                  localSettings.theme === 'auto' 
+                    ? "bg-primary text-white border-primary shadow-lg shadow-primary/20" 
+                    : "bg-white dark:bg-slate-800 text-slate-400 border-slate-100 dark:border-slate-700 hover:border-slate-200"
+                )}
+              >
+                <Clock className="w-4 h-4" />
+                Automático (Día/Noche)
+              </button>
+            </div>
+          </div>
+        </Card>
+
+        {/* Payment Methods */}
+        <Card className="p-8 bento-card border-none space-y-6 md:col-span-2">
+          <div className="flex items-center gap-3 mb-2">
+            <div className="w-8 h-8 bg-green-50 dark:bg-green-900/20 rounded-lg flex items-center justify-center text-green-600">
+              <CreditCard className="w-4 h-4" />
+            </div>
+            <h3 className="font-bold text-slate-800 dark:text-white">Medios de Pago / Cuentas</h3>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+            <div className="space-y-4">
+              <div className="flex gap-2">
+                <input 
+                  type="text" 
+                  value={newPaymentMethod}
+                  onChange={(e) => setNewPaymentMethod(e.target.value)}
+                  placeholder="Ej: Banco USA, Stripe..."
+                  className="flex-1 px-4 py-3 bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-700 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 dark:text-white"
+                />
+                <button 
+                  onClick={addPaymentMethod}
+                  className="px-6 py-3 bg-primary text-white font-black text-xs uppercase tracking-widest rounded-xl shadow-lg shadow-primary/20 hover:scale-105 transition-transform"
+                >
+                  Agregar
+                </button>
+              </div>
+              <p className="text-[10px] text-slate-400 italic">
+                Estos medios aparecerán como opciones al registrar transacciones y pagos.
+              </p>
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              {localSettings.paymentMethods.map(m => (
+                <div 
+                  key={m} 
+                  className="flex items-center gap-2 px-4 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-700 rounded-xl group hover:border-red-100 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+                >
+                  <span className="text-xs font-bold text-slate-600 dark:text-slate-300 group-hover:text-red-600">{m}</span>
+                  <button 
+                    onClick={() => removePaymentMethod(m)}
+                    className="text-slate-300 dark:text-slate-500 hover:text-red-600 transition-colors"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        </Card>
+      </div>
     </div>
   );
 }

@@ -9,11 +9,22 @@
   --color-neutral: #F8FAFC;
   --color-ink: #0F172A;
   --color-muted: #64748B;
+  
+  /* Dark mode variants */
+  --color-neutral-dark: #0F172A;
+  --color-ink-dark: #F8FAFC;
+  --color-muted-dark: #94A3B8;
+  --color-card-dark: #1E293B;
+  --color-border-dark: #334155;
 }
 
 @layer base {
   body {
-    @apply bg-neutral text-ink font-sans antialiased;
+    @apply bg-white text-ink font-sans antialiased transition-colors duration-300;
+  }
+  
+  :root.dark body {
+    @apply bg-neutral-dark text-ink-dark;
   }
 }
 
@@ -22,8 +33,16 @@
     @apply bg-white rounded-[16px] border border-slate-100 shadow-sm transition-all duration-300;
   }
   
+  :root.dark .bento-card {
+    @apply bg-card-dark border-border-dark;
+  }
+  
   .bento-card:hover {
     @apply shadow-md border-slate-200;
+  }
+
+  :root.dark .bento-card:hover {
+    @apply border-slate-700;
   }
 }
 

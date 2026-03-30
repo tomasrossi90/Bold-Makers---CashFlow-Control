@@ -1,7 +1,16 @@
-export type Currency = 'USD' | 'ARS';
+export type Currency = 'USD' | 'ARS' | 'EUR';
 export type PaymentStatus = 'paid' | 'pending';
-export type PaymentMethod = 'Mercury' | 'Stripe' | 'Santander Argentina' | 'Belo Argentina';
+export type PaymentMethod = string;
 export type CashflowType = 'income' | 'expense';
+
+export interface AppSettings {
+  id?: string;
+  currency: Currency;
+  decimals: number;
+  theme: 'light' | 'dark' | 'auto';
+  paymentMethods: string[];
+  updatedAt: string;
+}
 
 export interface Client {
   id?: string;
