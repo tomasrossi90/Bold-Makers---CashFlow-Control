@@ -490,7 +490,7 @@ export default function App() {
       {/* Main Content */}
       <main className="flex-1 overflow-y-auto overflow-x-hidden flex flex-col bg-slate-50 dark:bg-slate-950">
         {/* Header */}
-        <header className="h-20 bg-white/80 dark:bg-slate-900/80 backdrop-blur-md border-b border-slate-100 dark:border-slate-800 px-8 flex items-center justify-between sticky top-0 z-10">
+        <header className="py-6 bg-slate-50 dark:bg-slate-950 px-8 flex items-center justify-between sticky top-0 z-10">
           <h1 className="text-xl font-bold text-slate-800 dark:text-slate-100">
             {activeTab === 'dashboard' && 'Resumen del Negocio'}
             {activeTab === 'clients' && 'Gestión de Clientes'}
