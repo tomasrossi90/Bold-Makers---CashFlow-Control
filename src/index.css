@@ -30,23 +30,32 @@
 
 @layer components {
   .bento-card {
-    @apply bg-white rounded-[16px] border border-slate-100 shadow-sm transition-all duration-300;
-  }
-  
-  :root.dark .bento-card {
-    @apply bg-card-dark border-border-dark;
+    @apply bg-white dark:bg-slate-800 rounded-[16px] border border-slate-100 dark:border-slate-700 shadow-sm transition-all duration-300;
   }
   
   .bento-card:hover {
-    @apply shadow-md border-slate-200;
-  }
-
-  :root.dark .bento-card:hover {
-    @apply border-slate-700;
+    @apply shadow-md border-slate-200 dark:border-slate-600;
   }
 }
 
 /* Custom scrollbar */
+.custom-scrollbar::-webkit-scrollbar {
+  width: 4px;
+}
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: #E2E8F0;
+  border-radius: 10px;
+}
+.dark .custom-scrollbar::-webkit-scrollbar-thumb {
+  background: #334155;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: #CBD5E1;
+}
+
 ::-webkit-scrollbar {
   width: 6px;
 }
