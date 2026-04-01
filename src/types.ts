@@ -10,6 +10,9 @@ export interface AppSettings {
   theme: 'light' | 'dark' | 'auto';
   paymentMethods: string[];
   updatedAt: string;
+  payrollDay?: number;
+  defaultSetterCommissionPct: number;
+  defaultCloserCommissionPct: number;
 }
 
 export interface Client {
@@ -29,6 +32,10 @@ export interface Client {
   comments?: string;
   createdAt: string;
   deletedAt?: string;
+  setterId?: string;
+  closerId?: string;
+  setterCommissionPct?: number;
+  closerCommissionPct?: number;
 }
 
 export interface Payment {
@@ -62,10 +69,13 @@ export interface CashflowEntry {
   createdAt: string;
 }
 
+export type StaffType = 'setter' | 'closer' | 'other';
+
 export interface StaffMember {
   id?: string;
   name: string;
   role: string;
+  type: StaffType;
   email?: string;
   baseSalaryUSD: number;
   createdAt: string;
@@ -80,5 +90,21 @@ export interface PayrollPayment {
   date: string;
   period: string; // e.g., "March 2026"
   paymentMethod: PaymentMethod;
+  createdAt: string;
+}
+
+export interface Commission {
+  id?: string;
+  staffId: string;
+  staffName: string;
+  clientId: string;
+  clientName: string;
+  paymentId: string;
+  amountUSD: number;
+  percentage: number;
+  staffRole: 'setter' | 'closer';
+  status: 'pending' | 'paid';
+  date: string;
+  paidAt?: string;
   createdAt: string;
 }

@@ -19,7 +19,7 @@ import {
 } from 'firebase/firestore';
 import { onAuthStateChanged, User } from 'firebase/auth';
 import { db, auth, loginWithGoogle, logout } from './firebase';
-import { Client, Payment, CashflowEntry, Currency, PaymentStatus, PaymentMethod, CashflowType, StaffMember, PayrollPayment, AppSettings } from './types';
+import { Client, Payment, CashflowEntry, Currency, PaymentStatus, PaymentMethod, CashflowType, StaffMember, PayrollPayment, AppSettings, Commission, StaffType } from './types';
 import { 
   Users, 
   CreditCard, 
@@ -66,8 +66,11 @@ import {
   startOfYear,
   endOfYear,
   subYears,
-  addMonths
+  addMonths,
+  setDate
 } from 'date-fns';
+import { es } from 'date-fns/locale';
+import { Toaster, toast } from 'sonner';
 import { 
   AreaChart,
   Area,
@@ -92,6 +95,57 @@ function cn(...inputs: ClassValue[]) {
 }
 
 const formatUSD = (val: number) => Math.round(val || 0).toLocaleString();
+
+enum OperationType {
+  CREATE = 'create',
+  UPDATE = 'update',
+  DELETE = 'delete',
+  LIST = 'list',
+  GET = 'get',
+  WRITE = 'write',
+}
+
+interface FirestoreErrorInfo {
+  error: string;
+  operationType: OperationType;
+  path: string | null;
+  authInfo: {
+    userId?: string;
+    email?: string;
+    emailVerified?: boolean;
+    isAnonymous?: boolean;
+    tenantId?: string | null;
+    providerInfo: {
+      providerId: string;
+      displayName: string | null;
+      email: string | null;
+      photoUrl: string | null;
+    }[];
+  }
+}
+
+function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
+  const errInfo: FirestoreErrorInfo = {
+    error: error instanceof Error ? error.message : String(error),
+    authInfo: {
+      userId: auth.currentUser?.uid,
+      email: auth.currentUser?.email || undefined,
+      emailVerified: auth.currentUser?.emailVerified,
+      isAnonymous: auth.currentUser?.isAnonymous,
+      tenantId: auth.currentUser?.tenantId,
+      providerInfo: auth.currentUser?.providerData.map(provider => ({
+        providerId: provider.providerId,
+        displayName: provider.displayName,
+        email: provider.email,
+        photoUrl: provider.photoURL
+      })) || []
+    },
+    operationType,
+    path
+  };
+  console.error('Firestore Error: ', JSON.stringify(errInfo));
+  throw new Error(JSON.stringify(errInfo));
+}
 
 // --- Context ---
 export const SettingsContext = React.createContext<AppSettings | null>(null);
@@ -172,6 +226,10 @@ export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'dashboard' | 'clients' | 'payments' | 'cashflow' | 'payroll' | 'trash' | 'reports' | 'settings'>('dashboard');
+  
+  useEffect(() => {
+    (window as any).setActiveTab = setActiveTab;
+  }, []);
   const [showNotifications, setShowNotifications] = useState(false);
   const [isAddingClient, setIsAddingClient] = useState(false);
   const [isAddingCashflow, setIsAddingCashflow] = useState(false);
@@ -183,7 +241,10 @@ export default function App() {
     decimals: 0,
     theme: 'light',
     paymentMethods: ['Mercury', 'Stripe', 'Santander Argentina', 'Belo Argentina'],
-    updatedAt: new Date().toISOString()
+    updatedAt: new Date().toISOString(),
+    payrollDay: 5,
+    defaultSetterCommissionPct: 5,
+    defaultCloserCommissionPct: 10
   });
 
   const [clients, setClients] = useState<Client[]>([]);
@@ -191,6 +252,7 @@ export default function App() {
   const [cashflow, setCashflow] = useState<CashflowEntry[]>([]);
   const [staff, setStaff] = useState<StaffMember[]>([]);
   const [payroll, setPayroll] = useState<PayrollPayment[]>([]);
+  const [commissions, setCommissions] = useState<Commission[]>([]);
 
   const formatCurrency = (val: number) => {
     const symbols = {
@@ -279,6 +341,11 @@ export default function App() {
       setPayroll(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as PayrollPayment)));
     });
 
+    const qCommissions = query(collection(db, 'commissions'), orderBy('date', 'desc'));
+    const unsubCommissions = onSnapshot(qCommissions, (snap) => {
+      setCommissions(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Commission)));
+    });
+
     const unsubSettings = onSnapshot(doc(db, 'settings', user.uid), (snap) => {
       if (snap.exists()) {
         setSettings(snap.data() as AppSettings);
@@ -291,6 +358,7 @@ export default function App() {
       unsubCashflow();
       unsubStaff();
       unsubPayroll();
+      unsubCommissions();
       unsubSettings();
     };
   }, [user]);
@@ -335,6 +403,26 @@ export default function App() {
     };
   }, [settings.theme]);
 
+  const handleLogin = async () => {
+    try {
+      await loginWithGoogle();
+      toast.success('Sesión iniciada correctamente');
+    } catch (error) {
+      console.error('Error logging in:', error);
+      toast.error('Error al iniciar sesión');
+    }
+  };
+
+  const handleLogout = async () => {
+    try {
+      await logout();
+      toast.success('Sesión cerrada correctamente');
+    } catch (error) {
+      console.error('Error logging out:', error);
+      toast.error('Error al cerrar sesión');
+    }
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-white dark:bg-neutral-dark">
@@ -372,7 +460,7 @@ export default function App() {
             <p className="text-primary/60 text-sm font-medium px-4">
               Gestiona los ingresos y egresos de tu negocio de mentoría de forma profesional y eficiente.
             </p>
-            <Button onClick={loginWithGoogle} className="w-full py-4 text-lg shadow-xl shadow-primary/10">
+            <Button onClick={handleLogin} className="w-full py-4 text-lg shadow-xl shadow-primary/10">
               <LogIn className="w-6 h-6" />
               Ingresar con Google
             </Button>
@@ -387,6 +475,7 @@ export default function App() {
 
   return (
     <SettingsContext.Provider value={settings}>
+      <Toaster position="top-right" richColors />
       <div className="h-screen bg-slate-50 dark:bg-slate-950 transition-colors duration-500 flex flex-col md:flex-row overflow-hidden">
       {/* Sidebar */}
       <aside className={cn(
@@ -479,7 +568,7 @@ export default function App() {
               <Settings className="w-4 h-4" />
               {!isSidebarCollapsed && <span>Ajustes</span>}
             </button>
-            <button onClick={logout} className={cn("w-full flex items-center gap-3 px-4 py-2 text-sm font-medium text-muted hover:text-red-600 transition-colors", isSidebarCollapsed && "justify-center px-0")}>
+            <button onClick={handleLogout} className={cn("w-full flex items-center gap-3 px-4 py-2 text-sm font-medium text-muted hover:text-red-600 transition-colors", isSidebarCollapsed && "justify-center px-0")}>
               <LogOut className="w-4 h-4" />
               {!isSidebarCollapsed && <span>Cerrar Sesión</span>}
             </button>
@@ -585,12 +674,12 @@ export default function App() {
 
         <div className="p-8 bg-slate-50 dark:bg-slate-950">
           {activeTab === 'dashboard' && <DashboardView clients={activeClients} payments={activePayments} cashflow={cashflow} />}
-          {activeTab === 'clients' && <ClientsView clients={activeClients} isAdding={isAddingClient} setIsAdding={setIsAddingClient} payments={payments} cashflow={cashflow} />}
+          {activeTab === 'clients' && <ClientsView clients={activeClients} isAdding={isAddingClient} setIsAdding={setIsAddingClient} payments={payments} cashflow={cashflow} staff={activeStaff} settings={settings} />}
           {activeTab === 'payments' && <PaymentsView clients={activeClients} payments={activePayments} />}
-          {activeTab === 'cashflow' && <CashflowView cashflow={cashflow} isAdding={isAddingCashflow} setIsAdding={setIsAddingCashflow} clients={activeClients} payments={activePayments} />}
-          {activeTab === 'payroll' && <PayrollView staff={activeStaff} payroll={payroll} isAddingStaff={isAddingStaff} setIsAddingStaff={setIsAddingStaff} />}
+          {activeTab === 'cashflow' && <CashflowView cashflow={cashflow} isAdding={isAddingCashflow} setIsAdding={setIsAddingCashflow} clients={activeClients} payments={activePayments} staff={activeStaff} />}
+          {activeTab === 'payroll' && <PayrollView staff={activeStaff} payroll={payroll} commissions={commissions} isAddingStaff={isAddingStaff} setIsAddingStaff={setIsAddingStaff} />}
           {activeTab === 'trash' && <TrashView clients={deletedClients} payments={payments} />}
-          {activeTab === 'reports' && <ReportsView cashflow={cashflow} clients={activeClients} payments={activePayments} />}
+          {activeTab === 'reports' && <ReportsView cashflow={cashflow} clients={activeClients} payments={activePayments} commissions={commissions} staff={activeStaff} />}
           {activeTab === 'settings' && <SettingsView settings={settings} setSettings={setSettings} user={user!} />}
         </div>
       </main>
@@ -1129,7 +1218,7 @@ function StatCard({ label, value, icon, trend, color }: { label: string; value: 
 
 // --- Clients View ---
 
-function ClientsView({ clients, isAdding, setIsAdding, payments, cashflow }: { clients: Client[]; isAdding: boolean; setIsAdding: (v: boolean) => void; payments: Payment[]; cashflow: CashflowEntry[] }) {
+function ClientsView({ clients, isAdding, setIsAdding, payments, cashflow, staff, settings }: { clients: Client[]; isAdding: boolean; setIsAdding: (v: boolean) => void; payments: Payment[]; cashflow: CashflowEntry[]; staff: StaffMember[]; settings: AppSettings }) {
   const formatCurrency = useCurrency();
   const [search, setSearch] = useState('');
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
@@ -1145,27 +1234,47 @@ function ClientsView({ clients, isAdding, setIsAdding, payments, cashflow }: { c
     e.preventDefault();
     const formData = new FormData(e.currentTarget);
     const totalUSD = Number(formData.get('totalAmountUSD'));
-    const installments = Number(formData.get('installments'));
+    const installments = Number(formData.get('installments')) || 1;
 
-    const newClient: Omit<Client, 'id'> = {
-      firstName: formData.get('firstName') as string,
-      lastName: formData.get('lastName') as string,
-      dni: formData.get('dni') as string,
-      cuil: formData.get('cuil') as string,
-      email: formData.get('email') as string,
-      businessName: formData.get('businessName') as string,
-      address: formData.get('address') as string,
-      city: formData.get('city') as string,
-      province: formData.get('province') as string,
-      country: formData.get('country') as string,
+    if (isNaN(totalUSD) || totalUSD <= 0) {
+      toast.error("El monto total debe ser mayor a 0");
+      return;
+    }
+
+    const clientData: any = {
+      firstName: (formData.get('firstName') as string) || '',
+      lastName: (formData.get('lastName') as string) || '',
+      dni: (formData.get('dni') as string) || '',
+      cuil: (formData.get('cuil') as string) || '',
+      email: (formData.get('email') as string) || '',
+      businessName: (formData.get('businessName') as string) || '',
+      address: (formData.get('address') as string) || '',
+      city: (formData.get('city') as string) || '',
+      province: (formData.get('province') as string) || '',
+      country: (formData.get('country') as string) || '',
       installments,
       totalAmountUSD: totalUSD,
-      comments: formData.get('comments') as string,
-      createdAt: formData.get('createdAt') ? new Date(formData.get('createdAt') as string).toISOString() : new Date().toISOString()
+      comments: (formData.get('comments') as string) || '',
+      createdAt: formData.get('createdAt') ? new Date(formData.get('createdAt') as string).toISOString() : new Date().toISOString(),
     };
 
+    // Add optional staff fields only if they have values
+    const setterId = formData.get('setterId') as string;
+    if (setterId) clientData.setterId = setterId;
+    
+    const closerId = formData.get('closerId') as string;
+    if (closerId) clientData.closerId = closerId;
+
+    const setterComm = formData.get('setterCommissionPct');
+    const sComm = setterComm ? Number(setterComm) : NaN;
+    clientData.setterCommissionPct = isNaN(sComm) ? settings.defaultSetterCommissionPct : sComm;
+
+    const closerComm = formData.get('closerCommissionPct');
+    const cComm = closerComm ? Number(closerComm) : NaN;
+    clientData.closerCommissionPct = isNaN(cComm) ? settings.defaultCloserCommissionPct : cComm;
+
     try {
-      const docRef = await addDoc(collection(db, 'clients'), newClient);
+      const docRef = await addDoc(collection(db, 'clients'), clientData);
       
       // Generate pending payments
       const installmentAmount = totalUSD / installments;
@@ -1175,7 +1284,7 @@ function ClientsView({ clients, isAdding, setIsAdding, payments, cashflow }: { c
         
         await addDoc(collection(db, 'payments'), {
           clientId: docRef.id,
-          clientName: `${newClient.firstName} ${newClient.lastName}`,
+          clientName: `${clientData.firstName} ${clientData.lastName}`,
           installmentNumber: i,
           amount: installmentAmount,
           currency: 'USD',
@@ -1187,8 +1296,10 @@ function ClientsView({ clients, isAdding, setIsAdding, payments, cashflow }: { c
       }
 
       setIsAdding(false);
+      toast.success('Cliente agregado correctamente');
     } catch (err) {
       console.error("Error adding client:", err);
+      handleFirestoreError(err, OperationType.CREATE, 'clients');
     }
   };
 
@@ -1197,26 +1308,46 @@ function ClientsView({ clients, isAdding, setIsAdding, payments, cashflow }: { c
     if (!editingClient?.id) return;
     const formData = new FormData(e.currentTarget);
     
-    const updatedClient: Partial<Client> = {
-      firstName: formData.get('firstName') as string,
-      lastName: formData.get('lastName') as string,
-      dni: formData.get('dni') as string,
-      cuil: formData.get('cuil') as string,
-      email: formData.get('email') as string,
-      businessName: formData.get('businessName') as string,
-      address: formData.get('address') as string,
-      city: formData.get('city') as string,
-      province: formData.get('province') as string,
-      country: formData.get('country') as string,
-      comments: formData.get('comments') as string,
-      createdAt: formData.get('createdAt') ? new Date(formData.get('createdAt') as string).toISOString() : editingClient.createdAt
+    const updatedData: any = {
+      firstName: (formData.get('firstName') as string) || '',
+      lastName: (formData.get('lastName') as string) || '',
+      dni: (formData.get('dni') as string) || '',
+      cuil: (formData.get('cuil') as string) || '',
+      email: (formData.get('email') as string) || '',
+      businessName: (formData.get('businessName') as string) || '',
+      address: (formData.get('address') as string) || '',
+      city: (formData.get('city') as string) || '',
+      province: (formData.get('province') as string) || '',
+      country: (formData.get('country') as string) || '',
+      comments: (formData.get('comments') as string) || '',
+      createdAt: formData.get('createdAt') ? new Date(formData.get('createdAt') as string).toISOString() : editingClient.createdAt,
     };
 
+    const setterId = formData.get('setterId') as string;
+    updatedData.setterId = setterId || null; // Use null to clear if empty
+    
+    const closerId = formData.get('closerId') as string;
+    updatedData.closerId = closerId || null;
+
+    const setterComm = formData.get('setterCommissionPct');
+    if (setterComm !== null && setterComm !== '') {
+      const sComm = Number(setterComm);
+      updatedData.setterCommissionPct = isNaN(sComm) ? settings.defaultSetterCommissionPct : sComm;
+    }
+
+    const closerComm = formData.get('closerCommissionPct');
+    if (closerComm !== null && closerComm !== '') {
+      const cComm = Number(closerComm);
+      updatedData.closerCommissionPct = isNaN(cComm) ? settings.defaultCloserCommissionPct : cComm;
+    }
+
     try {
-      await updateDoc(doc(db, 'clients', editingClient.id), updatedClient);
+      await updateDoc(doc(db, 'clients', editingClient.id), updatedData);
       setEditingClient(null);
+      toast.success('Cliente actualizado correctamente');
     } catch (err) {
       console.error("Error updating client:", err);
+      handleFirestoreError(err, OperationType.UPDATE, `clients/${editingClient.id}`);
     }
   };
 
@@ -1238,8 +1369,10 @@ function ClientsView({ clients, isAdding, setIsAdding, payments, cashflow }: { c
       }
       
       setConfirmDeleteId(null);
+      toast.success('Cliente eliminado correctamente');
     } catch (err) {
       console.error("Error soft deleting client:", err);
+      toast.error('Error al eliminar el cliente');
     }
   };
 
@@ -1441,6 +1574,7 @@ function ClientsView({ clients, isAdding, setIsAdding, payments, cashflow }: { c
                 <Select 
                   label="Cuotas" 
                   name="installments" 
+                  defaultValue="1"
                   options={[
                     { value: '1', label: '1 Pago' },
                     { value: '2', label: '2 Pagos' },
@@ -1448,6 +1582,24 @@ function ClientsView({ clients, isAdding, setIsAdding, payments, cashflow }: { c
                     { value: '6', label: '6 Pagos' }
                   ]} 
                 />
+                <Select 
+                  label="Setter" 
+                  name="setterId" 
+                  options={[
+                    { value: '', label: 'Ninguno' },
+                    ...staff.filter(s => s.type === 'setter').map(s => ({ value: s.id!, label: s.name }))
+                  ]} 
+                />
+                <Input label="% Comisión Setter" name="setterCommissionPct" type="number" step="0.1" defaultValue={settings.defaultSetterCommissionPct} />
+                <Select 
+                  label="Closer" 
+                  name="closerId" 
+                  options={[
+                    { value: '', label: 'Ninguno' },
+                    ...staff.filter(s => s.type === 'closer').map(s => ({ value: s.id!, label: s.name }))
+                  ]} 
+                />
+                <Input label="% Comisión Closer" name="closerCommissionPct" type="number" step="0.1" defaultValue={settings.defaultCloserCommissionPct} />
               </div>
               <div className="space-y-2">
                 <label className="text-[10px] font-black text-primary/40 dark:text-slate-500 uppercase tracking-widest ml-1">Comentarios</label>
@@ -1484,6 +1636,26 @@ function ClientsView({ clients, isAdding, setIsAdding, payments, cashflow }: { c
                 <Input label="Provincia" name="province" defaultValue={editingClient.province} />
                 <Input label="País" name="country" defaultValue={editingClient.country} />
                 <Input label="Fecha de Ingreso" name="createdAt" type="date" defaultValue={format(parseISO(editingClient.createdAt), 'yyyy-MM-dd')} required />
+                <Select 
+                  label="Setter" 
+                  name="setterId" 
+                  defaultValue={editingClient.setterId || ''}
+                  options={[
+                    { value: '', label: 'Ninguno' },
+                    ...staff.filter(s => s.type === 'setter').map(s => ({ value: s.id!, label: s.name }))
+                  ]} 
+                />
+                <Input label="% Comisión Setter" name="setterCommissionPct" type="number" step="0.1" defaultValue={editingClient.setterCommissionPct ?? settings.defaultSetterCommissionPct} />
+                <Select 
+                  label="Closer" 
+                  name="closerId" 
+                  defaultValue={editingClient.closerId || ''}
+                  options={[
+                    { value: '', label: 'Ninguno' },
+                    ...staff.filter(s => s.type === 'closer').map(s => ({ value: s.id!, label: s.name }))
+                  ]} 
+                />
+                <Input label="% Comisión Closer" name="closerCommissionPct" type="number" step="0.1" defaultValue={editingClient.closerCommissionPct ?? settings.defaultCloserCommissionPct} />
               </div>
               <div className="space-y-2">
                 <label className="text-[10px] font-black text-primary/40 dark:text-slate-500 uppercase tracking-widest ml-1">Comentarios</label>
@@ -1689,8 +1861,10 @@ function PaymentsView({ clients, payments }: { clients: Client[]; payments: Paym
       });
 
       setIsPaying(null);
+      toast.success('Pago procesado correctamente');
     } catch (err) {
       console.error("Error processing payment:", err);
+      toast.error('Error al procesar el pago');
     }
   };
 
@@ -2011,8 +2185,27 @@ function TrashView({ clients, payments }: { clients: Client[]; payments: Payment
 
 // --- Reports View ---
 
-function ReportsView({ cashflow, clients, payments }: { cashflow: CashflowEntry[]; clients: Client[]; payments: Payment[] }) {
+function ReportsView({ cashflow, clients, payments, commissions, staff }: { cashflow: CashflowEntry[]; clients: Client[]; payments: Payment[]; commissions: Commission[]; staff: StaffMember[] }) {
   const formatCurrency = useCurrency();
+
+  const commissionsByStaff = useMemo(() => {
+    const stats: Record<string, { name: string; pending: number; paid: number; total: number }> = {};
+    
+    staff.forEach(s => {
+      stats[s.id!] = { name: s.name, pending: 0, paid: 0, total: 0 };
+    });
+
+    commissions.forEach(c => {
+      if (!stats[c.staffId]) {
+        stats[c.staffId] = { name: c.staffName, pending: 0, paid: 0, total: 0 };
+      }
+      if (c.status === 'pending') stats[c.staffId].pending += c.amountUSD;
+      else stats[c.staffId].paid += c.amountUSD;
+      stats[c.staffId].total += c.amountUSD;
+    });
+
+    return Object.values(stats).filter(s => s.total > 0).sort((a, b) => b.total - a.total);
+  }, [commissions, staff]);
   const incomeByCategory = useMemo(() => {
     const categories: Record<string, number> = {};
     cashflow.filter(e => e.type === 'income').forEach(e => {
@@ -2167,6 +2360,39 @@ function ReportsView({ cashflow, clients, payments }: { cashflow: CashflowEntry[
           </table>
         </div>
       </Card>
+
+      <Card className="p-8">
+        <h3 className="text-lg font-bold text-slate-800 dark:text-slate-100 mb-8">Comisiones por Staff (Setter/Closer)</h3>
+        <div className="overflow-x-auto">
+          <table className="w-full">
+            <thead>
+              <tr className="text-left border-b border-slate-50 dark:border-slate-700">
+                <th className="pb-4 text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest">Integrante</th>
+                <th className="pb-4 text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest">Pendiente de Cobro</th>
+                <th className="pb-4 text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest">Cobrado</th>
+                <th className="pb-4 text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest">Total Generado</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-50 dark:divide-slate-700">
+              {commissionsByStaff.map((item, i) => (
+                <tr key={i} className="group hover:bg-slate-50/50 dark:hover:bg-slate-900/50 transition-colors">
+                  <td className="py-5">
+                    <p className="text-sm font-bold text-slate-800 dark:text-white">{item.name}</p>
+                  </td>
+                  <td className="py-5 text-sm font-bold text-amber-600">{formatCurrency(item.pending)}</td>
+                  <td className="py-5 text-sm font-bold text-green-600">{formatCurrency(item.paid)}</td>
+                  <td className="py-5 text-sm font-black text-primary italic">{formatCurrency(item.total)}</td>
+                </tr>
+              ))}
+              {commissionsByStaff.length === 0 && (
+                <tr>
+                  <td colSpan={4} className="py-10 text-center text-sm text-slate-400 italic">No hay comisiones registradas aún.</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </Card>
     </div>
   );
 }
@@ -2178,13 +2404,15 @@ function CashflowView({
   isAdding, 
   setIsAdding, 
   clients, 
-  payments 
+  payments,
+  staff
 }: { 
   cashflow: CashflowEntry[]; 
   isAdding: boolean; 
   setIsAdding: (v: boolean) => void;
   clients: Client[];
   payments: Payment[];
+  staff: StaffMember[];
 }) {
   const settings = React.useContext(SettingsContext);
   const formatCurrency = useCurrency();
@@ -2254,13 +2482,14 @@ function CashflowView({
     const type = formData.get('type') as CashflowType;
     const paymentId = formData.get('paymentId') as string;
     const clientId = formData.get('clientId') as string;
+    const date = formData.get('date') as string;
     
     try {
-      await addDoc(collection(db, 'cashflow'), {
+      const cashflowRef = await addDoc(collection(db, 'cashflow'), {
         type,
         amountUSD,
         category: formData.get('category') as string,
-        date: formData.get('date') as string,
+        date,
         description: formData.get('description') as string,
         paymentMethod: formData.get('paymentMethod') as PaymentMethod,
         paymentId: paymentId || null,
@@ -2268,14 +2497,14 @@ function CashflowView({
         createdAt: new Date().toISOString()
       });
 
-      // If it's an income linked to a payment, update the payment
+      // If it's an income linked to a payment, update the payment and generate commissions
       if (type === 'income' && paymentId) {
         const payment = payments.find(p => p.id === paymentId);
+        const client = clients.find(c => c.id === (clientId || payment?.clientId));
+        
         if (payment) {
           const currentPaid = payment.paidAmountUSD || 0;
           const newPaid = currentPaid + amountUSD;
-          
-          // If the total paid reaches or exceeds the amount, mark as paid
           const isFullyPaid = newPaid >= payment.amountUSD;
           
           await updateDoc(doc(db, 'payments', paymentId), {
@@ -2285,13 +2514,61 @@ function CashflowView({
             paymentMethod: formData.get('paymentMethod') as PaymentMethod
           });
         }
+
+        if (client) {
+          // Calculate and add commissions
+          if (client.setterId) {
+            const setter = staff.find(s => s.id === client.setterId);
+            if (setter) {
+              const commissionAmount = (amountUSD * (client.setterCommissionPct || 0)) / 100;
+              if (commissionAmount > 0) {
+                await addDoc(collection(db, 'commissions'), {
+                  staffId: setter.id,
+                  staffName: setter.name,
+                  clientId: client.id,
+                  clientName: `${client.firstName} ${client.lastName}`,
+                  paymentId: paymentId,
+                  amountUSD: commissionAmount,
+                  percentage: client.setterCommissionPct || 0,
+                  staffRole: 'setter',
+                  status: 'pending',
+                  date: date,
+                  createdAt: new Date().toISOString()
+                });
+              }
+            }
+          }
+          if (client.closerId) {
+            const closer = staff.find(s => s.id === client.closerId);
+            if (closer) {
+              const commissionAmount = (amountUSD * (client.closerCommissionPct || 0)) / 100;
+              if (commissionAmount > 0) {
+                await addDoc(collection(db, 'commissions'), {
+                  staffId: closer.id,
+                  staffName: closer.name,
+                  clientId: client.id,
+                  clientName: `${client.firstName} ${client.lastName}`,
+                  paymentId: paymentId,
+                  amountUSD: commissionAmount,
+                  percentage: client.closerCommissionPct || 0,
+                  staffRole: 'closer',
+                  status: 'pending',
+                  date: date,
+                  createdAt: new Date().toISOString()
+                });
+              }
+            }
+          }
+        }
       }
 
       setIsAdding(false);
       setSelectedClientId('');
       setSelectedPaymentId('');
+      toast.success('Entrada agregada correctamente');
     } catch (err) {
       console.error("Error adding cashflow entry:", err);
+      toast.error('Error al agregar la entrada');
     }
   };
 
@@ -2331,8 +2608,10 @@ function CashflowView({
       });
 
       setEditingEntry(null);
+      toast.success('Entrada actualizada correctamente');
     } catch (err) {
       console.error("Error updating cashflow entry:", err);
+      toast.error('Error al actualizar la entrada');
     }
   };
 
@@ -2357,8 +2636,10 @@ function CashflowView({
 
       await deleteDoc(doc(db, 'cashflow', id));
       setIsDeletingId(null);
+      toast.success('Entrada eliminada correctamente');
     } catch (err) {
       console.error("Error deleting entry:", err);
+      toast.error('Error al eliminar la entrada');
     }
   };
 
@@ -2645,18 +2926,33 @@ function CashflowView({
 function PayrollView({ 
   staff, 
   payroll, 
+  commissions,
   isAddingStaff, 
   setIsAddingStaff 
 }: { 
   staff: StaffMember[]; 
   payroll: PayrollPayment[];
+  commissions: Commission[];
   isAddingStaff: boolean;
   setIsAddingStaff: (v: boolean) => void;
 }) {
   const settings = React.useContext(SettingsContext);
   const formatCurrency = useCurrency();
   const [isPayingStaff, setIsPayingStaff] = useState<StaffMember | null>(null);
+  const [editingStaff, setEditingStaff] = useState<StaffMember | null>(null);
   const [isDeletingStaffId, setIsDeletingStaffId] = useState<string | null>(null);
+
+  const nextPaymentDate = useMemo(() => {
+    const now = new Date();
+    const day = settings?.payrollDay || 5;
+    let nextDate = setDate(now, day);
+    
+    if (isAfter(now, nextDate)) {
+      nextDate = addMonths(nextDate, 1);
+    }
+    
+    return nextDate;
+  }, [settings?.payrollDay]);
 
   const handleAddStaff = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -2666,13 +2962,37 @@ function PayrollView({
       await addDoc(collection(db, 'staff'), {
         name: formData.get('name') as string,
         role: formData.get('role') as string,
+        type: formData.get('type') as StaffType,
         email: formData.get('email') as string,
         baseSalaryUSD: Number(formData.get('baseSalaryUSD')),
         createdAt: new Date().toISOString()
       });
       setIsAddingStaff(false);
+      toast.success('Integrante agregado correctamente');
     } catch (err) {
       console.error("Error adding staff member:", err);
+      handleFirestoreError(err, OperationType.CREATE, 'staff');
+    }
+  };
+
+  const handleUpdateStaff = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (!editingStaff?.id) return;
+    const formData = new FormData(e.currentTarget);
+    
+    try {
+      await updateDoc(doc(db, 'staff', editingStaff.id), {
+        name: formData.get('name') as string,
+        role: formData.get('role') as string,
+        type: formData.get('type') as StaffType,
+        email: formData.get('email') as string,
+        baseSalaryUSD: Number(formData.get('baseSalaryUSD')),
+      });
+      setEditingStaff(null);
+      toast.success('Integrante actualizado correctamente');
+    } catch (err) {
+      console.error("Error updating staff member:", err);
+      handleFirestoreError(err, OperationType.UPDATE, `staff/${editingStaff.id}`);
     }
   };
 
@@ -2709,8 +3029,10 @@ function PayrollView({
       });
 
       setIsPayingStaff(null);
+      toast.success('Pago de payroll procesado correctamente');
     } catch (err) {
       console.error("Error processing payroll:", err);
+      handleFirestoreError(err, OperationType.CREATE, 'payroll');
     }
   };
 
@@ -2720,73 +3042,301 @@ function PayrollView({
         deletedAt: new Date().toISOString()
       });
       setIsDeletingStaffId(null);
+      toast.success('Integrante eliminado correctamente');
     } catch (err) {
       console.error("Error deleting staff member:", err);
+      handleFirestoreError(err, OperationType.UPDATE, `staff/${id}`);
     }
   };
 
-  return (
-    <div className="space-y-8">
-      <div className="flex justify-end">
-        <Button onClick={() => setIsAddingStaff(true)}>
-          <Plus className="w-5 h-5" />
-          Agregar Integrante
-        </Button>
-      </div>
+  const handlePayCommission = async (commission: Commission) => {
+    try {
+      // 1. Mark commission as paid
+      await updateDoc(doc(db, 'commissions', commission.id!), {
+        status: 'paid',
+        paidAt: new Date().toISOString()
+      });
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        {/* Staff List */}
-        <div className="lg:col-span-2 space-y-4">
-          <h3 className="text-lg font-black text-primary uppercase italic tracking-tight mb-4">Integrantes de la <span className="text-secondary">Consultora</span></h3>
+      // 2. Record as expense in cashflow
+      await addDoc(collection(db, 'cashflow'), {
+        type: 'expense',
+        amountUSD: commission.amountUSD,
+        category: 'Comisiones',
+        date: format(new Date(), 'yyyy-MM-dd'),
+        description: `Comisión: ${commission.staffName} - Cliente: ${commission.clientName}`,
+        createdAt: new Date().toISOString()
+      });
+      toast.success('Comisión pagada correctamente');
+    } catch (err) {
+      console.error("Error paying commission:", err);
+      handleFirestoreError(err, OperationType.UPDATE, `commissions/${commission.id}`);
+    }
+  };
+
+  const pendingCommissions = commissions.filter(c => c.status === 'pending');
+  const paidCommissions = commissions.filter(c => c.status === 'paid');
+
+  const [activeSubTab, setActiveSubTab] = useState<'salaries' | 'commissions' | 'staff'>('salaries');
+
+  return (
+    <>
+      <div className="space-y-8">
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+          <h2 className="text-2xl font-black text-primary dark:text-secondary uppercase italic tracking-tight">Gestión de <span className="text-secondary dark:text-tertiary">Payroll</span></h2>
+          <div className="flex items-center gap-2 bg-neutral/50 dark:bg-slate-800/50 p-1 rounded-2xl border border-white/50 dark:border-slate-700">
+            <button 
+              onClick={() => setActiveSubTab('salaries')}
+              className={cn(
+                "px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all",
+                activeSubTab === 'salaries' ? "bg-primary text-white shadow-lg" : "text-primary/40 hover:text-primary"
+              )}
+            >
+              Sueldos Fijos
+            </button>
+            <button 
+              onClick={() => setActiveSubTab('commissions')}
+              className={cn(
+                "px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all",
+                activeSubTab === 'commissions' ? "bg-primary text-white shadow-lg" : "text-primary/40 hover:text-primary"
+              )}
+            >
+              Comisiones
+            </button>
+            <button 
+              onClick={() => setActiveSubTab('staff')}
+              className={cn(
+                "px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all",
+                activeSubTab === 'staff' ? "bg-primary text-white shadow-lg" : "text-primary/40 hover:text-primary"
+              )}
+            >
+              Integrantes
+            </button>
+          </div>
+        </div>
+
+      {activeSubTab === 'salaries' && (
+        <div className="space-y-8">
+          {/* Payroll Configuration & Info */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <Card className="p-8 bento-card bg-primary text-white border-none shadow-xl shadow-primary/20">
+              <div className="flex items-center gap-3 mb-4">
+                <div className="w-10 h-10 bg-white/10 rounded-xl flex items-center justify-center">
+                  <Calendar className="w-5 h-5 text-secondary" />
+                </div>
+                <p className="text-[10px] font-black uppercase tracking-[0.2em]">Próximos Pagos</p>
+              </div>
+              <p className="text-3xl font-black tracking-tighter italic mb-1">
+                {format(nextPaymentDate, 'dd')} de {format(nextPaymentDate, 'MMMM', { locale: es })}
+              </p>
+              <p className="text-xs opacity-60 font-medium">Fecha de vencimiento configurada: día {settings?.payrollDay || 5} de cada mes.</p>
+            </Card>
+            
+            <Card className="p-8 bento-card bg-white dark:bg-slate-800/50 border-none shadow-xl shadow-primary/5 col-span-2 flex items-center justify-between">
+              <div>
+                <h4 className="text-sm font-black text-primary dark:text-secondary uppercase tracking-widest mb-2">Configuración de Vencimiento</h4>
+                <p className="text-xs text-slate-400 max-w-md">Los pagos a empleados están programados para el día {settings?.payrollDay || 5}. Puedes cambiar esto en los ajustes del sistema.</p>
+              </div>
+              <Button variant="secondary" onClick={() => (window as any).setActiveTab('settings')} className="text-xs py-2">
+                Cambiar Fecha
+              </Button>
+            </Card>
+          </div>
+
+          <div className="space-y-4">
+            <h3 className="text-lg font-black text-primary uppercase italic tracking-tight mb-4">Sueldos <span className="text-secondary">Fijos</span></h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {staff.filter(s => s.baseSalaryUSD > 0).map(s => (
+                <Card key={s.id} className="p-6 flex flex-col justify-between group">
+                  <div className="flex items-center gap-4 mb-4">
+                    <div className="w-12 h-12 bg-primary/5 dark:bg-slate-800 rounded-xl flex items-center justify-center text-primary dark:text-secondary font-black">
+                      {s.name.charAt(0)}
+                    </div>
+                    <div>
+                      <p className="font-black text-primary dark:text-white tracking-tight">{s.name}</p>
+                      <p className="text-[10px] font-black text-secondary uppercase tracking-widest">{s.role}</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-between pt-4 border-t border-primary/5 dark:border-slate-700">
+                    <div className="text-left">
+                      <p className="text-[10px] font-black text-primary/40 dark:text-primary/60 uppercase tracking-widest">Sueldo Base</p>
+                      <p className="text-lg font-black text-primary dark:text-secondary italic">{formatCurrency(s.baseSalaryUSD)}</p>
+                    </div>
+                    <Button variant="tertiary" className="py-2 px-6 text-xs" onClick={() => setIsPayingStaff(s)}>
+                      Pagar Sueldo
+                    </Button>
+                  </div>
+                </Card>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {activeSubTab === 'commissions' && (
+        <div className="space-y-8">
+          <div className="flex items-center justify-between">
+            <h3 className="text-lg font-black text-primary uppercase italic tracking-tight">Comisiones por <span className="text-secondary">Venta</span></h3>
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] font-black text-primary/40 uppercase tracking-widest">Pendientes:</span>
+              <span className="text-sm font-black text-secondary italic">{formatCurrency(pendingCommissions.reduce((acc, c) => acc + c.amountUSD, 0))}</span>
+            </div>
+          </div>
+
+          {pendingCommissions.length === 0 ? (
+            <Card className="p-12 text-center border-slate-100 dark:border-slate-700">
+              <Star className="w-12 h-12 text-primary/10 dark:text-primary/20 mx-auto mb-4" />
+              <p className="text-primary/40 dark:text-primary/60 font-medium italic">No hay comisiones pendientes.</p>
+            </Card>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {pendingCommissions.map(c => (
+                <Card key={c.id} className="p-5 border-none shadow-xl shadow-primary/5 space-y-4 group">
+                  <div className="flex justify-between items-start">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <p className="text-sm font-black text-primary dark:text-white tracking-tight">{c.staffName}</p>
+                        <span className={cn(
+                          "px-2 py-0.5 rounded-full text-[8px] font-black uppercase tracking-widest",
+                          c.staffRole === 'setter' ? "bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400" : 
+                          c.staffRole === 'closer' ? "bg-purple-100 text-purple-600 dark:bg-purple-900/30 dark:text-purple-400" :
+                          "bg-gray-100 text-gray-600 dark:bg-gray-900/30 dark:text-gray-400"
+                        )}>
+                          {c.staffRole || 'N/A'}
+                        </span>
+                      </div>
+                      <p className="text-[10px] font-black text-secondary uppercase tracking-widest">Comisión {c.percentage}%</p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-lg font-black text-primary dark:text-secondary italic">{formatCurrency(c.amountUSD)}</p>
+                    </div>
+                  </div>
+                  <div className="p-3 bg-primary/5 dark:bg-slate-800/50 rounded-xl border border-primary/5 dark:border-slate-700">
+                    <p className="text-[9px] font-black text-primary/40 uppercase tracking-widest mb-1">Cliente / Venta</p>
+                    <p className="text-xs font-bold text-primary dark:text-slate-300 truncate">{c.clientName}</p>
+                  </div>
+                  <div className="flex items-center justify-between pt-2">
+                    <span className="text-[9px] font-bold text-primary/30 dark:text-primary/50">{format(parseISO(c.date), 'dd/MM/yyyy')}</span>
+                    <Button variant="tertiary" className="py-1.5 px-4 text-[10px]" onClick={() => handlePayCommission(c)}>
+                      Pagar Comisión
+                    </Button>
+                  </div>
+                </Card>
+              ))}
+            </div>
+          )}
+
+          {/* Paid Commissions History */}
+          {paidCommissions.length > 0 && (
+            <div className="space-y-4 pt-4">
+              <h4 className="text-xs font-black text-primary/40 uppercase tracking-[0.2em]">Historial Reciente de Comisiones</h4>
+              <div className="grid grid-cols-1 gap-2">
+                {paidCommissions.slice(0, 5).map(c => (
+                  <div key={c.id} className="flex items-center justify-between p-4 bg-white dark:bg-slate-800/30 rounded-xl border border-primary/5 dark:border-slate-700">
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 bg-green-500/10 rounded-lg flex items-center justify-center">
+                        <Check className="w-4 h-4 text-green-500" />
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <p className="text-xs font-black text-primary dark:text-slate-200">{c.staffName}</p>
+                          <span className={cn(
+                            "px-1.5 py-0.5 rounded-full text-[7px] font-black uppercase tracking-widest",
+                            c.staffRole === 'setter' ? "bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400" : 
+                            c.staffRole === 'closer' ? "bg-purple-100 text-purple-600 dark:bg-purple-900/30 dark:text-purple-400" :
+                            "bg-gray-100 text-gray-600 dark:bg-gray-900/30 dark:text-gray-400"
+                          )}>
+                            {c.staffRole || 'N/A'}
+                          </span>
+                        </div>
+                        <p className="text-[9px] font-bold text-primary/40 dark:text-slate-500 uppercase">{c.clientName}</p>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-sm font-black text-primary dark:text-slate-200 italic">{formatCurrency(c.amountUSD)}</p>
+                      <p className="text-[8px] font-bold text-primary/30 dark:text-slate-600">Pagado el {format(parseISO(c.paidAt!), 'dd/MM/yyyy')}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {activeSubTab === 'staff' && (
+        <div className="space-y-6">
+          <div className="flex justify-between items-center">
+            <h3 className="text-lg font-black text-primary uppercase italic tracking-tight">Integrantes de la <span className="text-secondary">Consultora</span></h3>
+            <Button onClick={() => setIsAddingStaff(true)} className="text-xs py-2">
+              <Plus className="w-4 h-4" />
+              Nuevo Integrante
+            </Button>
+          </div>
+          
           {staff.length === 0 ? (
             <Card className="p-12 text-center border-slate-100 dark:border-slate-700">
               <Users className="w-12 h-12 text-primary/10 dark:text-primary/20 mx-auto mb-4" />
               <p className="text-primary/40 dark:text-primary/60 font-medium italic">No hay integrantes registrados.</p>
             </Card>
           ) : (
-            staff.map(s => (
-              <Card key={s.id} className="p-6 flex items-center justify-between group">
-                <div className="flex items-center gap-4">
-                  <div className="w-12 h-12 bg-primary/5 dark:bg-slate-800 rounded-xl flex items-center justify-center text-primary dark:text-secondary font-black">
-                    {s.name.charAt(0)}
-                  </div>
-                  <div>
-                    <p className="font-black text-primary dark:text-white tracking-tight">{s.name}</p>
-                    <p className="text-[10px] font-black text-secondary uppercase tracking-widest">{s.role}</p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-6">
-                  <div className="text-right">
-                    <p className="text-[10px] font-black text-primary/40 dark:text-primary/60 uppercase tracking-widest">Sueldo Base</p>
-                    <p className="text-lg font-black text-primary dark:text-secondary italic">{formatCurrency(s.baseSalaryUSD)}</p>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Button variant="secondary" className="py-2 px-4 text-xs" onClick={() => setIsPayingStaff(s)}>
-                      Pagar
-                    </Button>
-                    {isDeletingStaffId === s.id ? (
-                      <div className="flex items-center gap-1 bg-red-50 dark:bg-red-900/20 p-1 rounded-lg">
-                        <button onClick={() => s.id && handleDeleteStaff(s.id)} className="text-red-600 dark:text-red-400 p-1"><Check className="w-4 h-4" /></button>
-                        <button onClick={() => setIsDeletingStaffId(null)} className="text-primary/40 dark:text-slate-500 p-1"><X className="w-4 h-4" /></button>
+            <div className="grid grid-cols-1 gap-3">
+              {staff.map(s => (
+                <Card key={s.id} className="p-4 flex items-center justify-between group">
+                  <div className="flex items-center gap-4">
+                    <div className="w-10 h-10 bg-primary/5 dark:bg-slate-800 rounded-xl flex items-center justify-center text-primary dark:text-secondary font-black">
+                      {s.name.charAt(0)}
+                    </div>
+                    <div>
+                      <p className="font-black text-primary dark:text-white tracking-tight text-sm">{s.name}</p>
+                      <div className="flex items-center gap-2">
+                        <p className="text-[9px] font-black text-secondary uppercase tracking-widest">{s.role}</p>
+                        <span className="text-[7px] font-bold text-primary/30 dark:text-primary/50 uppercase tracking-widest bg-primary/5 px-2 py-0.5 rounded-full">
+                          {s.type === 'setter' ? 'Setter' : s.type === 'closer' ? 'Closer' : 'Staff'}
+                        </span>
                       </div>
-                    ) : (
-                      <button onClick={() => s.id && setIsDeletingStaffId(s.id)} className="text-primary/10 dark:text-primary/30 hover:text-red-600 dark:hover:text-red-400 p-2 transition-colors">
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    )}
+                    </div>
                   </div>
-                </div>
-              </Card>
-            ))
+                  <div className="flex items-center gap-6">
+                    <div className="text-right">
+                      <p className="text-[8px] font-black text-primary/40 dark:text-primary/60 uppercase tracking-widest">Sueldo Base</p>
+                      <p className="text-sm font-black text-primary dark:text-secondary italic">{formatCurrency(s.baseSalaryUSD)}</p>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <button 
+                        onClick={() => setEditingStaff(s)}
+                        className="text-primary/10 dark:text-primary/30 hover:text-secondary p-2 transition-colors"
+                        title="Editar"
+                      >
+                        <Edit className="w-4 h-4" />
+                      </button>
+                      {isDeletingStaffId === s.id ? (
+                        <div className="flex items-center gap-1 bg-red-50 dark:bg-red-900/20 p-1 rounded-lg">
+                          <button onClick={() => s.id && handleDeleteStaff(s.id)} className="text-red-600 dark:text-red-400 p-1"><Check className="w-4 h-4" /></button>
+                          <button onClick={() => setIsDeletingStaffId(null)} className="text-primary/40 dark:text-slate-500 p-1"><X className="w-4 h-4" /></button>
+                        </div>
+                      ) : (
+                        <button 
+                          onClick={() => s.id && setIsDeletingStaffId(s.id)}
+                          className="text-primary/10 dark:text-primary/30 hover:text-red-600 dark:hover:text-red-400 p-2 transition-colors"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </Card>
+              ))}
+            </div>
           )}
         </div>
+      )}
 
-        {/* Recent Payroll History */}
-        <div className="space-y-4">
-          <h3 className="text-lg font-black text-primary dark:text-secondary uppercase italic tracking-tight mb-4">Historial de <span className="text-secondary dark:text-tertiary">Pagos</span></h3>
-          <div className="space-y-3">
-            {payroll.slice(0, 10).map(p => (
-              <Card key={p.id} className="p-4 border-none shadow-sm">
+      {activeSubTab === 'salaries' && (
+        <div className="space-y-4 pt-8 border-t border-primary/5 dark:border-slate-700">
+          <h3 className="text-lg font-black text-primary dark:text-secondary uppercase italic tracking-tight mb-4">Historial de <span className="text-secondary dark:text-tertiary">Pagos de Sueldo</span></h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {payroll.slice(0, 12).map(p => (
+              <Card key={p.id} className="p-4 border-none shadow-sm bg-white dark:bg-slate-800/30">
                 <div className="flex justify-between items-start">
                   <div>
                     <p className="text-xs font-black text-primary dark:text-secondary tracking-tight">{p.staffName}</p>
@@ -2801,11 +3351,12 @@ function PayrollView({
               </Card>
             ))}
             {payroll.length === 0 && (
-              <p className="text-xs text-primary/30 dark:text-primary/50 italic text-center py-8">No hay pagos registrados.</p>
+              <p className="text-xs text-primary/30 dark:text-primary/50 italic text-center py-8 col-span-full">No hay pagos registrados.</p>
             )}
           </div>
         </div>
-      </div>
+      )}
+    </div>
 
       {/* Modals */}
       {isAddingStaff && (
@@ -2820,6 +3371,15 @@ function PayrollView({
             <form onSubmit={handleAddStaff} className="space-y-6">
               <Input label="Nombre Completo" name="name" placeholder="Ej: Juan Perez" required />
               <Input label="Rol / Puesto" name="role" placeholder="Ej: Consultor Senior" required />
+              <Select 
+                label="Tipo de Integrante" 
+                name="type" 
+                options={[
+                  { value: 'other', label: 'Staff General' },
+                  { value: 'setter', label: 'Setter' },
+                  { value: 'closer', label: 'Closer' }
+                ]} 
+              />
               <Input label="Email" name="email" type="email" placeholder="juan@consultora.com" />
               <Input label="Sueldo Base (USD)" name="baseSalaryUSD" type="number" step="0.01" required />
               <div className="flex justify-end gap-4 pt-4">
@@ -2865,7 +3425,40 @@ function PayrollView({
           </Card>
         </div>
       )}
-    </div>
+
+      {editingStaff && (
+        <div className="fixed inset-0 bg-primary/40 backdrop-blur-md flex items-center justify-center p-4 z-50">
+          <Card className="max-w-md w-full p-10">
+            <div className="flex items-center justify-between mb-8">
+              <h3 className="text-2xl font-black text-primary dark:text-secondary uppercase italic tracking-tight">Editar <span className="text-secondary dark:text-tertiary">Integrante</span></h3>
+              <button onClick={() => setEditingStaff(null)} className="text-primary/40 hover:text-primary dark:hover:text-slate-200 transition-colors">
+                <X className="w-6 h-6" />
+              </button>
+            </div>
+            <form onSubmit={handleUpdateStaff} className="space-y-6">
+              <Input label="Nombre Completo" name="name" defaultValue={editingStaff.name} required />
+              <Input label="Rol / Puesto" name="role" defaultValue={editingStaff.role} required />
+              <Select 
+                label="Tipo de Integrante" 
+                name="type" 
+                defaultValue={editingStaff.type || 'other'}
+                options={[
+                  { value: 'other', label: 'Staff General' },
+                  { value: 'setter', label: 'Setter' },
+                  { value: 'closer', label: 'Closer' }
+                ]} 
+              />
+              <Input label="Email" name="email" type="email" defaultValue={editingStaff.email} />
+              <Input label="Sueldo Base (USD)" name="baseSalaryUSD" type="number" step="0.01" defaultValue={editingStaff.baseSalaryUSD} required />
+              <div className="flex justify-end gap-4 pt-4">
+                <Button variant="secondary" type="button" onClick={() => setEditingStaff(null)} className="px-8">Cancelar</Button>
+                <Button type="submit" className="px-10">Actualizar</Button>
+              </div>
+            </form>
+          </Card>
+        </div>
+      )}
+    </>
   );
 }
 
@@ -2873,7 +3466,6 @@ function SettingsView({ settings, setSettings, user }: { settings: AppSettings; 
   const [localSettings, setLocalSettings] = useState(settings);
   const [newPaymentMethod, setNewPaymentMethod] = useState('');
   const [isSaving, setIsSaving] = useState(false);
-  const [showSuccess, setShowSuccess] = useState(false);
 
   // Sync with external changes
   useEffect(() => {
@@ -2882,17 +3474,16 @@ function SettingsView({ settings, setSettings, user }: { settings: AppSettings; 
 
   const saveSettings = async () => {
     setIsSaving(true);
-    setShowSuccess(false);
     try {
       await setDoc(doc(db, 'settings', user.uid), {
         ...localSettings,
         updatedAt: new Date().toISOString()
       });
       setSettings(localSettings);
-      setShowSuccess(true);
-      setTimeout(() => setShowSuccess(false), 3000);
+      toast.success('Ajustes guardados correctamente');
     } catch (error) {
       console.error('Error saving settings:', error);
+      toast.error('Error al guardar los ajustes');
     } finally {
       setIsSaving(false);
     }
@@ -2935,12 +3526,6 @@ function SettingsView({ settings, setSettings, user }: { settings: AppSettings; 
         </div>
         
         <div className="flex items-center gap-4">
-          {showSuccess && (
-            <div className="flex items-center gap-2 text-green-500 font-bold text-sm animate-in fade-in slide-in-from-right-4">
-              <Check className="w-4 h-4" />
-              <span>¡Cambios guardados!</span>
-            </div>
-          )}
           <Button 
             onClick={saveSettings} 
             disabled={!hasChanges || isSaving}
@@ -3003,6 +3588,41 @@ function SettingsView({ settings, setSettings, user }: { settings: AppSettings; 
                   </button>
                 ))}
               </div>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Día de Pago (Payroll)</label>
+              <input 
+                type="number" 
+                min="1" 
+                max="31"
+                value={localSettings.payrollDay || 5}
+                onChange={(e) => updateField('payrollDay', parseInt(e.target.value))}
+                className="w-full px-4 py-3 bg-white dark:bg-slate-800 border border-slate-100 dark:border-slate-700 rounded-xl text-sm font-bold text-primary dark:text-white shadow-sm focus:outline-none focus:ring-2 focus:ring-primary/10"
+              />
+              <p className="text-[10px] text-slate-400 italic">Día del mes en que se vencen los pagos a empleados.</p>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">% Comisión Setter (Default)</label>
+              <input 
+                type="number" 
+                step="0.1"
+                value={localSettings.defaultSetterCommissionPct}
+                onChange={(e) => updateField('defaultSetterCommissionPct', parseFloat(e.target.value))}
+                className="w-full px-4 py-3 bg-white dark:bg-slate-800 border border-slate-100 dark:border-slate-700 rounded-xl text-sm font-bold text-primary dark:text-white shadow-sm focus:outline-none focus:ring-2 focus:ring-primary/10"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">% Comisión Closer (Default)</label>
+              <input 
+                type="number" 
+                step="0.1"
+                value={localSettings.defaultCloserCommissionPct}
+                onChange={(e) => updateField('defaultCloserCommissionPct', parseFloat(e.target.value))}
+                className="w-full px-4 py-3 bg-white dark:bg-slate-800 border border-slate-100 dark:border-slate-700 rounded-xl text-sm font-bold text-primary dark:text-white shadow-sm focus:outline-none focus:ring-2 focus:ring-primary/10"
+              />
             </div>
           </div>
         </Card>
