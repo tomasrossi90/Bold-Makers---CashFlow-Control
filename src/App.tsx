@@ -47,7 +47,8 @@ import {
   X,
   Settings,
   Moon,
-  Sun
+  Sun,
+  Menu
 } from 'lucide-react';
 import { 
   format, 
@@ -235,6 +236,7 @@ export default function App() {
   const [isAddingCashflow, setIsAddingCashflow] = useState(false);
   const [isAddingStaff, setIsAddingStaff] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   
   const [settings, setSettings] = useState<AppSettings>({
     currency: 'USD',
@@ -375,9 +377,11 @@ export default function App() {
       if (isDark) {
         document.documentElement.classList.add('dark');
         document.documentElement.style.colorScheme = 'dark';
+        document.body.classList.add('dark');
       } else {
         document.documentElement.classList.remove('dark');
         document.documentElement.style.colorScheme = 'light';
+        document.body.classList.remove('dark');
       }
     };
 
@@ -477,10 +481,36 @@ export default function App() {
     <SettingsContext.Provider value={settings}>
       <Toaster position="top-right" richColors />
       <div className="h-screen bg-slate-50 dark:bg-slate-950 transition-colors duration-500 flex flex-col md:flex-row overflow-hidden">
+      {/* Mobile Header */}
+      <div className="md:hidden bg-white dark:bg-slate-900 border-b border-slate-100 dark:border-slate-800 p-4 flex items-center justify-between sticky top-0 z-30">
+        <div className="flex items-center gap-3">
+          <div className="w-8 h-8 bg-primary rounded-lg flex items-center justify-center shadow-lg shadow-primary/20 shrink-0">
+            <TrendingUp className="w-5 h-5 text-white" />
+          </div>
+          <span className="text-lg font-black text-primary tracking-tighter leading-none">Bold Makers</span>
+        </div>
+        <button 
+          onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+          className="p-2 text-slate-400 hover:text-primary transition-colors"
+        >
+          {isMobileMenuOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
+        </button>
+      </div>
+
+      {/* Sidebar Overlay for Mobile */}
+      {isMobileMenuOpen && (
+        <div 
+          className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-40 md:hidden"
+          onClick={() => setIsMobileMenuOpen(false)}
+        />
+      )}
+
       {/* Sidebar */}
       <aside className={cn(
-        "bg-white dark:bg-slate-900 flex flex-col border-r border-slate-100 dark:border-slate-800 z-20 transition-all duration-300 relative shrink-0 max-h-[30vh] md:max-h-none",
-        isSidebarCollapsed ? "w-20" : "w-full md:w-72"
+        "bg-white dark:bg-slate-900 flex flex-col border-r border-slate-100 dark:border-slate-800 z-50 transition-all duration-300 relative shrink-0",
+        "fixed inset-y-0 left-0 md:static md:translate-x-0",
+        isMobileMenuOpen ? "translate-x-0 w-72" : "-translate-x-full md:translate-x-0",
+        isSidebarCollapsed ? "md:w-20" : "md:w-72"
       )}>
         <button 
           onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
@@ -506,49 +536,49 @@ export default function App() {
         <nav className={cn("flex-1 p-6 space-y-2 overflow-y-auto custom-scrollbar", isSidebarCollapsed && "px-4")}>
           <NavItem 
             active={activeTab === 'dashboard'} 
-            onClick={() => setActiveTab('dashboard')}
+            onClick={() => { setActiveTab('dashboard'); setIsMobileMenuOpen(false); }}
             icon={<TrendingUp className="w-5 h-5" />}
             label="Dashboard"
             collapsed={isSidebarCollapsed}
           />
           <NavItem 
             active={activeTab === 'clients'} 
-            onClick={() => setActiveTab('clients')}
+            onClick={() => { setActiveTab('clients'); setIsMobileMenuOpen(false); }}
             icon={<Users className="w-5 h-5" />}
             label="Clientes"
             collapsed={isSidebarCollapsed}
           />
           <NavItem 
             active={activeTab === 'payments'} 
-            onClick={() => setActiveTab('payments')}
+            onClick={() => { setActiveTab('payments'); setIsMobileMenuOpen(false); }}
             icon={<CreditCard className="w-5 h-5" />}
             label="Pagos"
             collapsed={isSidebarCollapsed}
           />
           <NavItem 
             active={activeTab === 'cashflow'} 
-            onClick={() => setActiveTab('cashflow')}
+            onClick={() => { setActiveTab('cashflow'); setIsMobileMenuOpen(false); }}
             icon={<DollarSign className="w-5 h-5" />}
             label="Transacciones"
             collapsed={isSidebarCollapsed}
           />
           <NavItem 
             active={activeTab === 'payroll'} 
-            onClick={() => setActiveTab('payroll')}
+            onClick={() => { setActiveTab('payroll'); setIsMobileMenuOpen(false); }}
             icon={<Users className="w-5 h-5" />}
             label="Payroll"
             collapsed={isSidebarCollapsed}
           />
           <NavItem 
             active={activeTab === 'trash'} 
-            onClick={() => setActiveTab('trash')}
+            onClick={() => { setActiveTab('trash'); setIsMobileMenuOpen(false); }}
             icon={<Trash2 className="w-5 h-5" />}
             label="Papelera"
             collapsed={isSidebarCollapsed}
           />
           <NavItem 
             active={activeTab === 'reports'} 
-            onClick={() => setActiveTab('reports')}
+            onClick={() => { setActiveTab('reports'); setIsMobileMenuOpen(false); }}
             icon={<Filter className="w-5 h-5" />}
             label="Reportes"
             collapsed={isSidebarCollapsed}
@@ -558,7 +588,7 @@ export default function App() {
         <div className={cn("p-6 mt-auto", isSidebarCollapsed && "px-4")}>
           <div className="pt-4 border-t border-slate-100 dark:border-slate-800 space-y-1">
             <button 
-              onClick={() => setActiveTab('settings')}
+              onClick={() => { setActiveTab('settings'); setIsMobileMenuOpen(false); }}
               className={cn(
                 "w-full flex items-center gap-3 px-4 py-2 text-sm font-medium transition-colors", 
                 activeTab === 'settings' ? "text-primary bg-slate-50 dark:bg-slate-800/50 rounded-lg" : "text-muted hover:text-primary",
@@ -579,8 +609,8 @@ export default function App() {
       {/* Main Content */}
       <main className="flex-1 overflow-y-auto overflow-x-hidden flex flex-col bg-slate-50 dark:bg-slate-950">
         {/* Header */}
-        <header className="py-6 bg-slate-50 dark:bg-slate-950 px-8 flex items-center justify-between sticky top-0 z-10">
-          <h1 className="text-xl font-bold text-slate-800 dark:text-slate-100">
+        <header className="py-6 bg-slate-50 dark:bg-slate-950 px-4 md:px-8 flex items-center justify-between sticky top-0 z-10 md:static">
+          <h1 className="text-lg md:text-xl font-bold text-slate-800 dark:text-slate-100">
             {activeTab === 'dashboard' && 'Resumen del Negocio'}
             {activeTab === 'clients' && 'Gestión de Clientes'}
             {activeTab === 'payments' && 'Control de Pagos'}
@@ -1894,8 +1924,9 @@ function PaymentsView({ clients, payments }: { clients: Client[]; payments: Paym
         </div>
       </div>
 
-      <Card className="overflow-hidden">
-        <div className="overflow-x-auto">
+      <Card className="overflow-hidden border-none md:border md:border-slate-100 dark:md:border-slate-800">
+        {/* Desktop Table View */}
+        <div className="hidden md:block overflow-x-auto">
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="bg-primary/5 dark:bg-slate-900/50 border-b border-primary/5 dark:border-slate-700">
@@ -1931,44 +1962,111 @@ function PaymentsView({ clients, payments }: { clients: Client[]; payments: Paym
                         {isUpcoming && <span className="text-[9px] font-black text-amber-500 uppercase tracking-widest">Próximo</span>}
                       </div>
                     </td>
-                  <td className="px-8 py-5 text-lg font-black text-primary tracking-tighter italic">
-                    {formatCurrency(payment.amountUSD)}
-                    {payment.paidAmountUSD && payment.paidAmountUSD < payment.amountUSD && (
-                      <p className="text-[10px] text-secondary font-bold not-italic tracking-normal mt-1">
-                        Restante: {formatCurrency(payment.amountUSD - payment.paidAmountUSD)}
-                      </p>
-                    )}
-                  </td>
-                  <td className="px-8 py-5">
-                    <span className={cn(
-                      "px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest",
-                      payment.status === 'paid' 
-                        ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400" 
-                        : (payment.paidAmountUSD && payment.paidAmountUSD > 0 
-                          ? "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400" 
-                          : "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400")
-                    )}>
-                      {payment.status === 'paid' ? 'Pagado' : 
-                       (payment.paidAmountUSD && payment.paidAmountUSD > 0 ? 'Parcial' : 'Pendiente')}
-                    </span>
-                  </td>
-                  <td className="px-8 py-5 text-right">
-                    {payment.status === 'pending' ? (
-                      <Button variant="secondary" className="py-2 px-4 text-xs" onClick={() => setIsPaying(payment)}>
-                        Registrar Pago
-                      </Button>
-                    ) : (
-                      <div className="flex items-center justify-end gap-2 text-xs font-bold text-primary/40">
-                        <CheckCircle className="w-4 h-4 text-green-500" />
-                        {payment.paymentMethod}
-                      </div>
-                    )}
-                  </td>
-                </tr>
+                    <td className="px-8 py-5 text-lg font-black text-primary tracking-tighter italic">
+                      {formatCurrency(payment.amountUSD)}
+                      {payment.paidAmountUSD && payment.paidAmountUSD < payment.amountUSD && (
+                        <p className="text-[10px] text-secondary font-bold not-italic tracking-normal mt-1">
+                          Restante: {formatCurrency(payment.amountUSD - payment.paidAmountUSD)}
+                        </p>
+                      )}
+                    </td>
+                    <td className="px-8 py-5">
+                      <span className={cn(
+                        "px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest",
+                        payment.status === 'paid' 
+                          ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400" 
+                          : (payment.paidAmountUSD && payment.paidAmountUSD > 0 
+                            ? "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400" 
+                            : "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400")
+                      )}>
+                        {payment.status === 'paid' ? 'Pagado' : 
+                         (payment.paidAmountUSD && payment.paidAmountUSD > 0 ? 'Parcial' : 'Pendiente')}
+                      </span>
+                    </td>
+                    <td className="px-8 py-5 text-right">
+                      {payment.status === 'pending' ? (
+                        <Button variant="secondary" className="py-2 px-4 text-xs" onClick={() => setIsPaying(payment)}>
+                          Registrar Pago
+                        </Button>
+                      ) : (
+                        <div className="flex items-center justify-end gap-2 text-xs font-bold text-primary/40">
+                          <CheckCircle className="w-4 h-4 text-green-500" />
+                          {payment.paymentMethod}
+                        </div>
+                      )}
+                    </td>
+                  </tr>
                 );
               })}
             </tbody>
           </table>
+        </div>
+
+        {/* Mobile Card View */}
+        <div className="md:hidden divide-y divide-primary/5 dark:divide-slate-800">
+          {filteredPayments.map(payment => {
+            const now = new Date();
+            const dueDate = parseISO(payment.dueDate);
+            const diffDays = Math.ceil((dueDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+            const isOverdue = diffDays <= 0 && payment.status === 'pending';
+            const isUpcoming = diffDays <= 7 && diffDays > 0 && payment.status === 'pending';
+
+            return (
+              <div key={payment.id} className="p-4 space-y-4">
+                <div className="flex justify-between items-start">
+                  <div>
+                    <h4 className="font-black text-primary dark:text-slate-100 tracking-tight">{payment.clientName}</h4>
+                    <p className="text-[10px] font-bold text-primary/40 dark:text-slate-500 uppercase tracking-widest mt-0.5">Cuota #{payment.installmentNumber}</p>
+                  </div>
+                  <span className={cn(
+                    "px-2 py-1 rounded-full text-[8px] font-black uppercase tracking-widest",
+                    payment.status === 'paid' 
+                      ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400" 
+                      : (payment.paidAmountUSD && payment.paidAmountUSD > 0 
+                        ? "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400" 
+                        : "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400")
+                  )}>
+                    {payment.status === 'paid' ? 'Pagado' : 
+                     (payment.paidAmountUSD && payment.paidAmountUSD > 0 ? 'Parcial' : 'Pendiente')}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <p className="text-[9px] font-black text-primary/30 uppercase tracking-widest mb-1">Vencimiento</p>
+                    <div className="flex flex-col">
+                      <span className={cn(
+                        "text-xs font-bold",
+                        isOverdue ? "text-red-600" : isUpcoming ? "text-amber-600" : "text-primary/60"
+                      )}>
+                        {format(parseISO(payment.dueDate), 'dd/MM/yyyy')}
+                      </span>
+                      {isOverdue && <span className="text-[8px] font-black text-red-500 uppercase tracking-widest">Vencido</span>}
+                    </div>
+                  </div>
+                  <div>
+                    <p className="text-[9px] font-black text-primary/30 uppercase tracking-widest mb-1">Monto (USD)</p>
+                    <p className="text-sm font-black text-primary dark:text-secondary tracking-tighter italic">
+                      {formatCurrency(payment.amountUSD)}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="pt-2">
+                  {payment.status === 'pending' ? (
+                    <Button variant="secondary" className="w-full py-2 text-xs" onClick={() => setIsPaying(payment)}>
+                      Registrar Pago
+                    </Button>
+                  ) : (
+                    <div className="flex items-center gap-2 text-xs font-bold text-primary/40 bg-slate-50 dark:bg-slate-900/50 p-2 rounded-lg">
+                      <CheckCircle className="w-4 h-4 text-green-500" />
+                      <span>Pagado vía {payment.paymentMethod}</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })}
         </div>
       </Card>
 
@@ -2717,39 +2815,39 @@ function CashflowView({
 
       <div className="grid grid-cols-1 gap-4">
         {filteredCashflow.map(entry => (
-          <Card key={entry.id} className="p-6 bento-card flex items-center justify-between gap-6 group">
-            <div className="flex items-center gap-6">
+          <Card key={entry.id} className="p-4 md:p-6 bento-card flex flex-col sm:flex-row sm:items-center justify-between gap-4 md:gap-6 group">
+            <div className="flex items-center gap-4 md:gap-6">
               <div className={cn(
-                "w-14 h-14 rounded-[18px] flex items-center justify-center transition-transform duration-300 group-hover:scale-110",
+                "w-12 h-12 md:w-14 md:h-14 rounded-[18px] flex items-center justify-center transition-transform duration-300 group-hover:scale-110 shrink-0",
                 entry.type === 'income' 
                   ? "bg-green-100 text-green-700 dark:bg-green-900/20 dark:text-green-400" 
                   : "bg-red-100 text-red-700 dark:bg-red-900/20 dark:text-red-400"
               )}>
-                {entry.type === 'income' ? <ArrowUpRight className="w-6 h-6" /> : <ArrowDownRight className="w-6 h-6" />}
+                {entry.type === 'income' ? <ArrowUpRight className="w-5 h-5 md:w-6 md:h-6" /> : <ArrowDownRight className="w-5 h-5 md:w-6 md:h-6" />}
               </div>
-              <div>
-                <p className="font-black text-primary text-lg tracking-tight">{entry.description}</p>
-                <div className="flex items-center gap-3 mt-1">
-                  <span className="text-xs font-bold text-primary/40 dark:text-slate-500">{format(parseISO(entry.date), 'dd/MM/yyyy')}</span>
-                  <span className="w-1 h-1 bg-primary/10 dark:bg-slate-700 rounded-full"></span>
-                  <span className="text-[10px] font-black uppercase tracking-widest text-primary/40 dark:text-slate-500 bg-primary/5 dark:bg-slate-800 px-2 py-0.5 rounded-full">{entry.category}</span>
+              <div className="min-w-0">
+                <p className="font-black text-primary text-base md:text-lg tracking-tight truncate">{entry.description}</p>
+                <div className="flex flex-wrap items-center gap-2 md:gap-3 mt-1">
+                  <span className="text-[10px] md:text-xs font-bold text-primary/40 dark:text-slate-500">{format(parseISO(entry.date), 'dd/MM/yyyy')}</span>
+                  <span className="hidden sm:block w-1 h-1 bg-primary/10 dark:bg-slate-700 rounded-full"></span>
+                  <span className="text-[9px] md:text-[10px] font-black uppercase tracking-widest text-primary/40 dark:text-slate-500 bg-primary/5 dark:bg-slate-800 px-2 py-0.5 rounded-full">{entry.category}</span>
                   {entry.paymentMethod && (
                     <>
-                      <span className="w-1 h-1 bg-primary/10 dark:bg-slate-700 rounded-full"></span>
-                      <span className="text-[10px] font-black uppercase tracking-widest text-secondary">{entry.paymentMethod}</span>
+                      <span className="hidden sm:block w-1 h-1 bg-primary/10 dark:bg-slate-700 rounded-full"></span>
+                      <span className="text-[9px] md:text-[10px] font-black uppercase tracking-widest text-secondary">{entry.paymentMethod}</span>
                     </>
                   )}
                 </div>
               </div>
             </div>
-            <div className="flex items-center gap-4">
+            <div className="flex items-center justify-between sm:justify-end gap-4 border-t sm:border-t-0 pt-3 sm:pt-0 border-primary/5">
               <p className={cn(
-                "text-2xl font-black tracking-tighter italic",
+                "text-xl md:text-2xl font-black tracking-tighter italic",
                 entry.type === 'income' ? "text-green-600" : "text-red-600"
               )}>
                 {entry.type === 'income' ? '+' : '-'}{formatCurrency(entry.amountUSD)}
               </p>
-              <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+              <div className="flex items-center gap-1 sm:opacity-0 group-hover:opacity-100 transition-opacity">
                 <button 
                   onClick={() => setEditingEntry(entry)} 
                   className="text-primary/20 dark:text-slate-600 hover:text-primary dark:hover:text-slate-200 transition-colors p-2"
@@ -3082,8 +3180,8 @@ function PayrollView({
     <>
       <div className="space-y-8">
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-          <h2 className="text-2xl font-black text-primary dark:text-secondary uppercase italic tracking-tight">Gestión de <span className="text-secondary dark:text-tertiary">Payroll</span></h2>
-          <div className="flex items-center gap-2 bg-neutral/50 dark:bg-slate-800/50 p-1 rounded-2xl border border-white/50 dark:border-slate-700">
+          <h2 className="text-xl md:text-2xl font-black text-primary dark:text-secondary uppercase italic tracking-tight">Gestión de <span className="text-secondary dark:text-tertiary">Payroll</span></h2>
+          <div className="flex items-center gap-2 bg-neutral/50 dark:bg-slate-800/50 p-1 rounded-2xl border border-white/50 dark:border-slate-700 overflow-x-auto whitespace-nowrap max-w-full hide-scrollbar">
             <button 
               onClick={() => setActiveSubTab('salaries')}
               className={cn(
@@ -3281,14 +3379,14 @@ function PayrollView({
           ) : (
             <div className="grid grid-cols-1 gap-3">
               {staff.map(s => (
-                <Card key={s.id} className="p-4 flex items-center justify-between group">
+                <Card key={s.id} className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 group">
                   <div className="flex items-center gap-4">
-                    <div className="w-10 h-10 bg-primary/5 dark:bg-slate-800 rounded-xl flex items-center justify-center text-primary dark:text-secondary font-black">
+                    <div className="w-10 h-10 bg-primary/5 dark:bg-slate-800 rounded-xl flex items-center justify-center text-primary dark:text-secondary font-black shrink-0">
                       {s.name.charAt(0)}
                     </div>
-                    <div>
-                      <p className="font-black text-primary dark:text-white tracking-tight text-sm">{s.name}</p>
-                      <div className="flex items-center gap-2">
+                    <div className="min-w-0">
+                      <p className="font-black text-primary dark:text-white tracking-tight text-sm truncate">{s.name}</p>
+                      <div className="flex flex-wrap items-center gap-2">
                         <p className="text-[9px] font-black text-secondary uppercase tracking-widest">{s.role}</p>
                         <span className="text-[7px] font-bold text-primary/30 dark:text-primary/50 uppercase tracking-widest bg-primary/5 px-2 py-0.5 rounded-full">
                           {s.type === 'setter' ? 'Setter' : s.type === 'closer' ? 'Closer' : 'Staff'}
@@ -3296,8 +3394,8 @@ function PayrollView({
                       </div>
                     </div>
                   </div>
-                  <div className="flex items-center gap-6">
-                    <div className="text-right">
+                  <div className="flex items-center justify-between sm:justify-end gap-6 border-t sm:border-t-0 pt-3 sm:pt-0 border-primary/5">
+                    <div className="text-left sm:text-right">
                       <p className="text-[8px] font-black text-primary/40 dark:text-primary/60 uppercase tracking-widest">Sueldo Base</p>
                       <p className="text-sm font-black text-primary dark:text-secondary italic">{formatCurrency(s.baseSalaryUSD)}</p>
                     </div>
@@ -3518,10 +3616,10 @@ function SettingsView({ settings, setSettings, user }: { settings: AppSettings; 
   const hasChanges = JSON.stringify(localSettings) !== JSON.stringify(settings);
 
   return (
-    <div className="max-w-4xl mx-auto space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-700">
-      <div className="flex items-center justify-between">
+    <div className="max-w-4xl mx-auto space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-700 p-4 md:p-0">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h2 className="text-2xl font-black text-primary dark:text-secondary tracking-tighter italic">Ajustes del Sistema</h2>
+          <h2 className="text-xl md:text-2xl font-black text-primary dark:text-secondary tracking-tighter italic">Ajustes del Sistema</h2>
           <p className="text-slate-400 text-sm">Configura las preferencias de tu espacio de trabajo.</p>
         </div>
         
@@ -3530,7 +3628,7 @@ function SettingsView({ settings, setSettings, user }: { settings: AppSettings; 
             onClick={saveSettings} 
             disabled={!hasChanges || isSaving}
             className={cn(
-              "px-8 py-3 shadow-xl transition-all",
+              "w-full sm:w-auto px-8 py-3 shadow-xl transition-all",
               hasChanges ? "shadow-primary/20 scale-105" : "opacity-50 grayscale"
             )}
           >
