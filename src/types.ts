@@ -2,6 +2,8 @@ export type Currency = 'USD' | 'ARS' | 'EUR';
 export type PaymentStatus = 'paid' | 'pending';
 export type PaymentMethod = string;
 export type CashflowType = 'income' | 'expense';
+export type InvoiceStatus = 'pending' | 'completed' | 'not_required';
+export type InvoiceType = 'arca' | 'receipt';
 
 export interface AppSettings {
   id?: string;
@@ -21,6 +23,8 @@ export interface Client {
   lastName: string;
   dni?: string;
   cuil?: string;
+  cuit?: string;
+  phone?: string;
   email?: string;
   businessName?: string;
   address?: string;
@@ -52,6 +56,10 @@ export interface Payment {
   dueDate: string;
   paymentMethod?: PaymentMethod;
   status: PaymentStatus;
+  invoiceStatus?: InvoiceStatus;
+  invoiceType?: InvoiceType;
+  invoiceUrl?: string;
+  invoiceNumber?: string;
   createdAt: string;
   deletedAt?: string;
 }

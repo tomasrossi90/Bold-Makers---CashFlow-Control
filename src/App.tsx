@@ -19,7 +19,7 @@ import {
 } from 'firebase/firestore';
 import { onAuthStateChanged, User } from 'firebase/auth';
 import { db, auth, loginWithGoogle, logout } from './firebase';
-import { Client, Payment, CashflowEntry, Currency, PaymentStatus, PaymentMethod, CashflowType, StaffMember, PayrollPayment, AppSettings, Commission, StaffType } from './types';
+import { Client, Payment, CashflowEntry, Currency, PaymentStatus, PaymentMethod, CashflowType, StaffMember, PayrollPayment, AppSettings, Commission, StaffType, InvoiceStatus, InvoiceType } from './types';
 import { 
   Users, 
   CreditCard, 
@@ -36,6 +36,8 @@ import {
   LogIn, 
   ChevronRight, 
   ChevronLeft,
+  ChevronDown,
+  ChevronUp,
   DollarSign, 
   ArrowUpRight, 
   ArrowDownRight,
@@ -45,6 +47,8 @@ import {
   CheckCircle,
   Clock,
   AlertCircle,
+  FileText,
+  Download,
   X,
   Settings,
   Moon,
@@ -273,6 +277,55 @@ export default function App() {
   const [staff, setStaff] = useState<StaffMember[]>([]);
   const [payroll, setPayroll] = useState<PayrollPayment[]>([]);
   const [commissions, setCommissions] = useState<Commission[]>([]);
+
+  const generateCommissions = async (amountUSD: number, clientId: string, paymentId: string, date: string) => {
+    const client = clients.find(c => c.id === clientId);
+    if (!client) return;
+
+    if (client.setterId) {
+      const setter = staff.find(s => s.id === client.setterId);
+      if (setter) {
+        const commissionAmount = (amountUSD * (client.setterCommissionPct || 0)) / 100;
+        if (commissionAmount > 0) {
+          await addDoc(collection(db, 'commissions'), {
+            staffId: setter.id,
+            staffName: setter.name,
+            clientId: client.id,
+            clientName: `${client.firstName} ${client.lastName}`,
+            paymentId: paymentId,
+            amountUSD: commissionAmount,
+            percentage: client.setterCommissionPct || 0,
+            staffRole: 'setter',
+            status: 'pending',
+            date: date,
+            createdAt: new Date().toISOString()
+          });
+        }
+      }
+    }
+
+    if (client.closerId) {
+      const closer = staff.find(s => s.id === client.closerId);
+      if (closer) {
+        const commissionAmount = (amountUSD * (client.closerCommissionPct || 0)) / 100;
+        if (commissionAmount > 0) {
+          await addDoc(collection(db, 'commissions'), {
+            staffId: closer.id,
+            staffName: closer.name,
+            clientId: client.id,
+            clientName: `${client.firstName} ${client.lastName}`,
+            paymentId: paymentId,
+            amountUSD: commissionAmount,
+            percentage: client.closerCommissionPct || 0,
+            staffRole: 'closer',
+            status: 'pending',
+            date: date,
+            createdAt: new Date().toISOString()
+          });
+        }
+      }
+    }
+  };
 
   const formatCurrency = (val: number) => {
     const symbols = {
@@ -616,6 +669,13 @@ export default function App() {
             collapsed={isSidebarCollapsed}
           />
           <NavItem 
+            active={activeTab === 'invoices'} 
+            onClick={() => { setActiveTab('invoices'); setIsMobileMenuOpen(false); }}
+            icon={<FileText className="w-5 h-5" />}
+            label="Facturas"
+            collapsed={isSidebarCollapsed}
+          />
+          <NavItem 
             active={activeTab === 'cashflow'} 
             onClick={() => { setActiveTab('cashflow'); setIsMobileMenuOpen(false); }}
             icon={<DollarSign className="w-5 h-5" />}
@@ -663,7 +723,7 @@ export default function App() {
               {!isSidebarCollapsed && <span>Cerrar Sesión</span>}
             </button>
             <div className={cn("pt-4 text-center", isSidebarCollapsed ? "px-0" : "px-4")}>
-              <span className="text-[9px] font-black text-slate-300 dark:text-slate-700 uppercase tracking-[0.3em]">v1.0.5 PROD</span>
+              <span className="text-[9px] font-black text-slate-300 dark:text-slate-700 uppercase tracking-[0.3em]">v1.1.0 PROD</span>
             </div>
           </div>
         </div>
@@ -677,6 +737,7 @@ export default function App() {
             {activeTab === 'dashboard' && 'Resumen del Negocio'}
             {activeTab === 'clients' && 'Gestión de Clientes'}
             {activeTab === 'payments' && 'Control de Pagos'}
+            {activeTab === 'invoices' && 'Control de Facturación'}
             {activeTab === 'cashflow' && 'Transacciones'}
             {activeTab === 'payroll' && 'Gestión de Payroll'}
             {activeTab === 'trash' && 'Papelera de Reciclaje'}
@@ -763,8 +824,9 @@ export default function App() {
         <div className="p-8 bg-slate-50 dark:bg-slate-950">
           {activeTab === 'dashboard' && <DashboardView clients={filteredClients} payments={filteredPayments} cashflow={filteredCashflow} onNavigate={setActiveTab} />}
           {activeTab === 'clients' && <ClientsView clients={filteredClients} isAdding={isAddingClient} setIsAdding={setIsAddingClient} payments={payments} cashflow={cashflow} staff={activeStaff} settings={settings} searchTerm={searchTerm} setSearchTerm={setSearchTerm} />}
-          {activeTab === 'payments' && <PaymentsView clients={filteredClients} payments={filteredPayments} searchTerm={searchTerm} setSearchTerm={setSearchTerm} />}
-          {activeTab === 'cashflow' && <CashflowView cashflow={filteredCashflow} isAdding={isAddingCashflow} setIsAdding={setIsAddingCashflow} clients={activeClients} payments={activePayments} staff={activeStaff} searchTerm={searchTerm} setSearchTerm={setSearchTerm} />}
+          {activeTab === 'payments' && <PaymentsView clients={filteredClients} payments={filteredPayments} searchTerm={searchTerm} setSearchTerm={setSearchTerm} generateCommissions={generateCommissions} />}
+          {activeTab === 'invoices' && <InvoicesView payments={filteredPayments} clients={filteredClients} searchTerm={searchTerm} setSearchTerm={setSearchTerm} />}
+          {activeTab === 'cashflow' && <CashflowView cashflow={filteredCashflow} isAdding={isAddingCashflow} setIsAdding={setIsAddingCashflow} clients={activeClients} payments={activePayments} staff={activeStaff} searchTerm={searchTerm} setSearchTerm={setSearchTerm} generateCommissions={generateCommissions} />}
           {activeTab === 'payroll' && <PayrollView staff={filteredStaff} payroll={payroll} commissions={commissions} isAddingStaff={isAddingStaff} setIsAddingStaff={setIsAddingStaff} setSettings={setSettings} user={user!} searchTerm={searchTerm} setSearchTerm={setSearchTerm} />}
           {activeTab === 'trash' && <TrashView clients={deletedClients} payments={payments} searchTerm={searchTerm} setSearchTerm={setSearchTerm} />}
           {activeTab === 'reports' && <ReportsView cashflow={filteredCashflow} clients={filteredClients} payments={filteredPayments} commissions={commissions} staff={filteredStaff} searchTerm={searchTerm} setSearchTerm={setSearchTerm} />}
@@ -841,7 +903,9 @@ function DashboardView({
       .filter(p => p.status === 'pending')
       .reduce((acc, p) => acc + p.amountUSD, 0);
 
-    return { monthlyIncome, monthlyExpenses, totalRevenue, pendingPayments, profit: monthlyIncome - monthlyExpenses };
+    const pendingInvoices = payments.filter(p => p.status === 'paid' && p.invoiceStatus === 'pending').length;
+
+    return { monthlyIncome, monthlyExpenses, totalRevenue, pendingPayments, profit: monthlyIncome - monthlyExpenses, pendingInvoices };
   }, [cashflow, payments, currentMonth]);
 
   const chartData = useMemo(() => {
@@ -942,7 +1006,7 @@ function DashboardView({
 
   return (
     <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-700">
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-6">
         <StatCard 
           label="Balance Total" 
           value={formatCurrency(stats.totalRevenue)} 
@@ -967,6 +1031,14 @@ function DashboardView({
           value={formatCurrency(stats.profit)} 
           icon={<Star className="w-6 h-6" />}
           color="tertiary"
+        />
+        <StatCard 
+          label="Facturas Pendientes" 
+          value={stats.pendingInvoices.toString()} 
+          icon={<FileText className="w-5 h-5" />}
+          trend={stats.pendingInvoices > 0 ? "Atención" : "Al día"}
+          color={stats.pendingInvoices > 0 ? "secondary" : "primary"}
+          onClick={() => onNavigate('invoices')}
         />
       </div>
 
@@ -1351,7 +1423,7 @@ function DashboardView({
   );
 }
 
-function StatCard({ label, value, icon, trend, color }: { label: string; value: string; icon: React.ReactNode; trend?: string; color: 'secondary' | 'red' | 'tertiary' | 'primary' }) {
+function StatCard({ label, value, icon, trend, color, onClick }: { label: string; value: string; icon: React.ReactNode; trend?: string; color: 'secondary' | 'red' | 'tertiary' | 'primary'; onClick?: () => void }) {
   const colors = {
     secondary: 'bg-secondary/10 text-secondary',
     red: 'bg-red-50 text-red-600',
@@ -1360,10 +1432,14 @@ function StatCard({ label, value, icon, trend, color }: { label: string; value: 
   };
   
   return (
-    <Card className={cn(
-      "p-6 border-none transition-all duration-300",
-      color === 'tertiary' ? "bg-tertiary shadow-xl shadow-tertiary/20" : ""
-    )}>
+    <Card 
+      onClick={onClick}
+      className={cn(
+        "p-6 border-none transition-all duration-300",
+        onClick && "cursor-pointer hover:scale-[1.02] active:scale-[0.98]",
+        color === 'tertiary' ? "bg-tertiary shadow-xl shadow-tertiary/20" : ""
+      )}
+    >
       <div className="flex items-start justify-between mb-4">
         <div className={cn(
           "w-10 h-10 rounded-lg flex items-center justify-center", 
@@ -1438,6 +1514,8 @@ function ClientsView({
       lastName: (formData.get('lastName') as string) || '',
       dni: (formData.get('dni') as string) || '',
       cuil: (formData.get('cuil') as string) || '',
+      cuit: (formData.get('cuit') as string) || '',
+      phone: (formData.get('phone') as string) || '',
       email: (formData.get('email') as string) || '',
       businessName: (formData.get('businessName') as string) || '',
       address: (formData.get('address') as string) || '',
@@ -1505,6 +1583,8 @@ function ClientsView({
       lastName: (formData.get('lastName') as string) || '',
       dni: (formData.get('dni') as string) || '',
       cuil: (formData.get('cuil') as string) || '',
+      cuit: (formData.get('cuit') as string) || '',
+      phone: (formData.get('phone') as string) || '',
       email: (formData.get('email') as string) || '',
       businessName: (formData.get('businessName') as string) || '',
       address: (formData.get('address') as string) || '',
@@ -1761,6 +1841,8 @@ function ClientsView({
                 <Input label="Apellido" name="lastName" required />
                 <Input label="DNI" name="dni" />
                 <Input label="CUIL" name="cuil" />
+                <Input label="CUIT" name="cuit" />
+                <Input label="Teléfono" name="phone" />
                 <Input label="Email" name="email" type="email" />
                 <Input label="Razón Social" name="businessName" />
                 <Input label="Domicilio" name="address" />
@@ -1827,6 +1909,8 @@ function ClientsView({
                 <Input label="Apellido" name="lastName" defaultValue={editingClient.lastName} required />
                 <Input label="DNI" name="dni" defaultValue={editingClient.dni} />
                 <Input label="CUIL" name="cuil" defaultValue={editingClient.cuil} />
+                <Input label="CUIT" name="cuit" defaultValue={editingClient.cuit} />
+                <Input label="Teléfono" name="phone" defaultValue={editingClient.phone} />
                 <Input label="Email" name="email" type="email" defaultValue={editingClient.email} />
                 <Input label="Razón Social" name="businessName" defaultValue={editingClient.businessName} />
                 <Input label="Domicilio" name="address" defaultValue={editingClient.address} />
@@ -2008,12 +2092,14 @@ function PaymentsView({
   clients, 
   payments,
   searchTerm,
-  setSearchTerm
+  setSearchTerm,
+  generateCommissions
 }: { 
   clients: Client[]; 
   payments: Payment[];
   searchTerm: string;
   setSearchTerm: (v: string) => void;
+  generateCommissions: (amountUSD: number, clientId: string, paymentId: string, date: string) => Promise<void>;
 }) {
   const settings = React.useContext(SettingsContext);
   const formatCurrency = useCurrency();
@@ -2057,6 +2143,8 @@ function PaymentsView({
     const rate = Number(formData.get('exchangeRate') || 1);
     
     const amountUSD = currency === 'USD' ? amount : amount / rate;
+    const paymentMethod = formData.get('paymentMethod') as PaymentMethod;
+    const isAutomaticReceipt = ['Mercury', 'Stripe'].includes(paymentMethod);
 
     try {
       const currentPaid = isPaying.paidAmountUSD || 0;
@@ -2070,8 +2158,10 @@ function PaymentsView({
         currency,
         amountUSD: isPaying.amountUSD, // Keep the original target amount
         exchangeRate: currency === 'ARS' ? rate : null,
-        paymentMethod: formData.get('paymentMethod') as PaymentMethod,
-        paymentDate: new Date().toISOString()
+        paymentMethod,
+        paymentDate: new Date().toISOString(),
+        invoiceStatus: isFullyPaid ? (isAutomaticReceipt ? 'completed' : 'pending') : 'not_required',
+        invoiceType: isAutomaticReceipt ? 'receipt' : 'arca'
       });
 
       // Update next installment's due date if this one is fully paid
@@ -2100,6 +2190,9 @@ function PaymentsView({
         clientId: isPaying.clientId,
         createdAt: new Date().toISOString()
       });
+
+      // Generate commissions
+      await generateCommissions(amountUSD, isPaying.clientId, isPaying.id!, format(new Date(), 'yyyy-MM-dd'));
 
       setIsPaying(null);
       toast.success('Pago procesado correctamente');
@@ -2137,6 +2230,7 @@ function PaymentsView({
                 <th className="px-8 py-5 text-[10px] font-black text-primary/40 dark:text-slate-500 uppercase tracking-widest">Vencimiento</th>
                 <th className="px-8 py-5 text-[10px] font-black text-primary/40 dark:text-slate-500 uppercase tracking-widest">Monto (USD)</th>
                 <th className="px-8 py-5 text-[10px] font-black text-primary/40 dark:text-slate-500 uppercase tracking-widest">Estado</th>
+                <th className="px-8 py-5 text-[10px] font-black text-primary/40 dark:text-slate-500 uppercase tracking-widest">Factura</th>
                 <th className="px-8 py-5 text-[10px] font-black text-primary/40 dark:text-slate-500 uppercase tracking-widest text-left">Acción</th>
               </tr>
             </thead>
@@ -2185,6 +2279,19 @@ function PaymentsView({
                          (payment.paidAmountUSD && payment.paidAmountUSD > 0 ? 'Parcial' : 'Pendiente')}
                       </span>
                     </td>
+                    <td className="px-8 py-5">
+                      {payment.status === 'paid' && payment.invoiceStatus !== 'not_required' && (
+                        <div className="flex items-center gap-2">
+                          <div className={cn(
+                            "w-2 h-2 rounded-full",
+                            payment.invoiceStatus === 'completed' ? "bg-green-500" : "bg-amber-500"
+                          )} />
+                          <span className="text-[10px] font-bold text-primary/60 dark:text-slate-400 uppercase tracking-widest">
+                            {payment.invoiceStatus === 'completed' ? 'Emitida' : 'Pendiente'}
+                          </span>
+                        </div>
+                      )}
+                    </td>
                     <td className="px-8 py-5 text-left">
                       {payment.status === 'pending' ? (
                         <Button variant="secondary" className="py-2 px-4 text-xs" onClick={() => setIsPaying(payment)}>
@@ -2232,6 +2339,15 @@ function PaymentsView({
                      (payment.paidAmountUSD && payment.paidAmountUSD > 0 ? 'Parcial' : 'Pendiente')}
                   </span>
                 </div>
+
+                {payment.status === 'paid' && payment.invoiceStatus !== 'not_required' && (
+                  <div className="flex items-center gap-2 px-2 py-1 bg-slate-50 dark:bg-slate-900/50 rounded-lg w-fit">
+                    <FileText className={cn("w-3 h-3", payment.invoiceStatus === 'completed' ? "text-green-500" : "text-amber-500")} />
+                    <span className="text-[9px] font-black text-primary/60 dark:text-slate-400 uppercase tracking-widest">
+                      Factura {payment.invoiceStatus === 'completed' ? 'Emitida' : 'Pendiente'}
+                    </span>
+                  </div>
+                )}
 
                 <div className="grid grid-cols-2 gap-4">
                   <div>
@@ -2372,6 +2488,267 @@ function PaymentsView({
           </Card>
         </div>
       )}
+    </div>
+  );
+}
+
+// --- Invoices View ---
+
+function InvoicesView({ payments, clients, searchTerm, setSearchTerm }: { payments: Payment[]; clients: Client[]; searchTerm: string; setSearchTerm: (v: string) => void }) {
+  const settings = React.useContext(SettingsContext);
+  const formatCurrency = useCurrency();
+  const [filterStatus, setFilterStatus] = useState<InvoiceStatus | 'all'>('all');
+  const [filterType, setFilterType] = useState<InvoiceType | 'all'>('all');
+  const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
+
+  const toggleRow = (id: string) => {
+    const newExpanded = new Set(expandedRows);
+    if (newExpanded.has(id)) {
+      newExpanded.delete(id);
+    } else {
+      newExpanded.add(id);
+    }
+    setExpandedRows(newExpanded);
+  };
+
+  const filteredInvoices = useMemo(() => {
+    return payments
+      .filter(p => p.status === 'paid' && p.invoiceStatus !== 'not_required')
+      .filter(p => {
+        const matchesStatus = filterStatus === 'all' || p.invoiceStatus === filterStatus;
+        const matchesType = filterType === 'all' || p.invoiceType === filterType;
+        const matchesSearch = !searchTerm || 
+          p.clientName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          p.invoiceNumber?.toLowerCase().includes(searchTerm.toLowerCase());
+        return matchesStatus && matchesType && matchesSearch;
+      })
+      .sort((a, b) => (b.paymentDate || '').localeCompare(a.paymentDate || ''));
+  }, [payments, filterStatus, filterType, searchTerm]);
+
+  const handleUpdateInvoice = async (paymentId: string, data: Partial<Payment>) => {
+    try {
+      await updateDoc(doc(db, 'payments', paymentId), data);
+      toast.success('Factura actualizada');
+    } catch (err) {
+      console.error("Error updating invoice:", err);
+      toast.error('Error al actualizar factura');
+    }
+  };
+
+  return (
+    <div className="space-y-8">
+      <ContextualSearch value={searchTerm} onChange={setSearchTerm} placeholder="Buscar por cliente o número de factura..." />
+      
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
+        <div className="flex flex-col sm:flex-row gap-4">
+          <select 
+            value={filterStatus}
+            onChange={(e) => setFilterStatus(e.target.value as any)}
+            className="bg-white dark:bg-slate-800 border border-slate-100 dark:border-slate-700 rounded-xl px-4 py-2 text-xs font-bold text-primary dark:text-white shadow-sm focus:outline-none focus:ring-2 focus:ring-primary/10"
+          >
+            <option value="all">Todos los estados</option>
+            <option value="pending">Pendientes</option>
+            <option value="completed">Completadas</option>
+          </select>
+          <select 
+            value={filterType}
+            onChange={(e) => setFilterType(e.target.value as any)}
+            className="bg-white dark:bg-slate-800 border border-slate-100 dark:border-slate-700 rounded-xl px-4 py-2 text-xs font-bold text-primary dark:text-white shadow-sm focus:outline-none focus:ring-2 focus:ring-primary/10"
+          >
+            <option value="all">Todos los tipos</option>
+            <option value="arca">ARCA (Local)</option>
+            <option value="receipt">Receipt (Intl)</option>
+          </select>
+        </div>
+      </div>
+
+      <Card className="overflow-hidden border-none md:border md:border-slate-100 dark:md:border-slate-800">
+        <div className="overflow-x-auto">
+          <table className="w-full text-left border-collapse">
+            <thead>
+              <tr className="bg-primary/5 dark:bg-slate-900/50 border-b border-primary/5 dark:border-slate-700">
+                <th className="px-6 py-4 text-[10px] font-black text-primary/40 dark:text-slate-500 uppercase tracking-widest w-10"></th>
+                <th className="px-6 py-4 text-[10px] font-black text-primary/40 dark:text-slate-500 uppercase tracking-widest">Estado</th>
+                <th className="px-6 py-4 text-[10px] font-black text-primary/40 dark:text-slate-500 uppercase tracking-widest">Cliente</th>
+                <th className="px-6 py-4 text-[10px] font-black text-primary/40 dark:text-slate-500 uppercase tracking-widest">Pago / Cuenta</th>
+                <th className="px-6 py-4 text-[10px] font-black text-primary/40 dark:text-slate-500 uppercase tracking-widest">Monto</th>
+                <th className="px-6 py-4 text-[10px] font-black text-primary/40 dark:text-slate-500 uppercase tracking-widest">Cuota</th>
+                <th className="px-6 py-4 text-[10px] font-black text-primary/40 dark:text-slate-500 uppercase tracking-widest">Factura</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-primary/5 dark:divide-slate-800">
+              {filteredInvoices.length === 0 ? (
+                <tr>
+                  <td colSpan={7} className="px-6 py-20 text-center">
+                    <div className="w-12 h-12 bg-slate-100 dark:bg-slate-800 rounded-full flex items-center justify-center mx-auto mb-4 text-slate-300">
+                      <FileText className="w-6 h-6" />
+                    </div>
+                    <p className="text-slate-400 font-bold">No se encontraron facturas pendientes.</p>
+                  </td>
+                </tr>
+              ) : (
+                filteredInvoices.map(invoice => {
+                  const client = clients.find(c => c.id === invoice.clientId);
+                  const isExpanded = expandedRows.has(invoice.id!);
+                  return (
+                    <React.Fragment key={invoice.id}>
+                      <tr className={cn(
+                        "hover:bg-primary/[0.02] dark:hover:bg-slate-800/50 transition-colors group cursor-pointer",
+                        isExpanded && "bg-primary/[0.03] dark:bg-slate-800/70"
+                      )} onClick={() => toggleRow(invoice.id!)}>
+                        <td className="px-6 py-4">
+                          {isExpanded ? <ChevronUp className="w-4 h-4 text-primary/40" /> : <ChevronDown className="w-4 h-4 text-primary/40" />}
+                        </td>
+                        <td className="px-6 py-4">
+                          <div className={cn(
+                            "w-2 h-2 rounded-full",
+                            invoice.invoiceStatus === 'completed' ? "bg-green-500" : "bg-amber-500"
+                          )} />
+                        </td>
+                        <td className="px-6 py-4">
+                          <div className="flex flex-col">
+                            <span className="text-sm font-black text-primary dark:text-slate-100 tracking-tight">{invoice.clientName}</span>
+                            <span className="text-[10px] font-bold text-secondary uppercase tracking-widest">Ver datos fiscales</span>
+                          </div>
+                        </td>
+                        <td className="px-6 py-4">
+                          <div className="flex flex-col">
+                            <span className="text-[11px] font-black text-primary dark:text-slate-200">
+                              {invoice.paymentDate ? format(parseISO(invoice.paymentDate), 'dd/MM/yyyy') : 'S/F'}
+                            </span>
+                            <span className="text-[10px] font-bold text-secondary uppercase tracking-widest">{invoice.paymentMethod}</span>
+                          </div>
+                        </td>
+                        <td className="px-6 py-4">
+                          <div className="flex flex-col">
+                            <span className="text-sm font-black text-primary dark:text-secondary italic">
+                              {invoice.currency} {invoice.amount.toLocaleString(undefined, { minimumFractionDigits: settings?.decimals || 0, maximumFractionDigits: settings?.decimals || 0 })}
+                            </span>
+                            {invoice.currency !== 'USD' && (
+                              <span className="text-[10px] font-bold text-slate-400">
+                                Eq: {formatCurrency(invoice.amountUSD)}
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                        <td className="px-6 py-4">
+                          <span className="text-xs font-black text-primary/40 dark:text-slate-500 italic">#{invoice.installmentNumber}</span>
+                        </td>
+                        <td className="px-6 py-4" onClick={(e) => e.stopPropagation()}>
+                          <div className="flex flex-col gap-2">
+                            <div className="flex items-center gap-2">
+                              <span className="text-[10px] font-black text-primary/30 dark:text-slate-600 uppercase tracking-widest">{invoice.invoiceType === 'arca' ? 'ARCA' : 'Receipt'}</span>
+                              {invoice.invoiceStatus === 'completed' ? (
+                                <span className="text-xs font-black text-primary dark:text-white">{invoice.invoiceNumber || 'S/N'}</span>
+                              ) : (
+                                <input 
+                                  type="text" 
+                                  placeholder="Nº..."
+                                  defaultValue={invoice.invoiceNumber}
+                                  className="w-24 bg-slate-50 dark:bg-slate-900 border-none rounded-lg px-2 py-1 text-[10px] font-bold text-primary dark:text-white outline-none focus:ring-1 focus:ring-secondary/20"
+                                  onBlur={(e) => {
+                                    if (e.target.value !== invoice.invoiceNumber) {
+                                      handleUpdateInvoice(invoice.id!, { invoiceNumber: e.target.value });
+                                    }
+                                  }}
+                                />
+                              )}
+                            </div>
+                            <div className="flex items-center gap-2">
+                              {invoice.invoiceStatus === 'completed' ? (
+                                <div className="flex items-center gap-3">
+                                  <div className="flex items-center gap-1.5 px-2 py-1 bg-green-50 dark:bg-green-900/20 rounded-lg">
+                                    <CheckCircle className="w-3 h-3 text-green-500" />
+                                    <span className="text-[9px] font-black text-green-600 dark:text-green-400 uppercase tracking-widest">Emitida</span>
+                                  </div>
+                                  <button 
+                                    onClick={() => handleUpdateInvoice(invoice.id!, { invoiceStatus: 'pending' })}
+                                    className="text-[9px] font-bold text-slate-400 hover:text-primary uppercase tracking-widest transition-colors"
+                                  >
+                                    Editar
+                                  </button>
+                                  {invoice.invoiceUrl && (
+                                    <a href={invoice.invoiceUrl} target="_blank" rel="noopener noreferrer" className="text-secondary hover:scale-110 transition-transform">
+                                      <Download className="w-3 h-3" />
+                                    </a>
+                                  )}
+                                </div>
+                              ) : (
+                                <button 
+                                  onClick={() => handleUpdateInvoice(invoice.id!, { invoiceStatus: 'completed' })}
+                                  className="flex items-center gap-1.5 px-3 py-1.5 bg-secondary hover:bg-secondary/90 text-primary font-black text-[9px] uppercase tracking-widest rounded-lg transition-all shadow-sm shadow-secondary/20 active:scale-95"
+                                >
+                                  <Check className="w-3 h-3" />
+                                  Marcar Emitida
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        </td>
+                      </tr>
+                      {isExpanded && (
+                        <tr className="bg-primary/[0.01] dark:bg-slate-900/30">
+                          <td colSpan={7} className="px-12 py-6">
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-8 animate-in fade-in slide-in-from-top-2 duration-300">
+                              <div className="space-y-3">
+                                <p className="text-[10px] font-black text-primary/30 dark:text-slate-600 uppercase tracking-[0.2em]">Datos Personales</p>
+                                <div className="space-y-1">
+                                  <p className="text-xs font-bold text-slate-500 dark:text-slate-400">DNI / CUIL / CUIT</p>
+                                  <p className="text-sm font-black text-primary dark:text-white">{client?.dni || client?.cuil || client?.cuit || 'No registrado'}</p>
+                                </div>
+                                <div className="space-y-1">
+                                  <p className="text-xs font-bold text-slate-500 dark:text-slate-400">Email</p>
+                                  <p className="text-sm font-black text-primary dark:text-white">{client?.email || 'No registrado'}</p>
+                                </div>
+                                <div className="space-y-1">
+                                  <p className="text-xs font-bold text-slate-500 dark:text-slate-400">Teléfono</p>
+                                  <p className="text-sm font-black text-primary dark:text-white">{client?.phone || 'No registrado'}</p>
+                                </div>
+                              </div>
+                              
+                              <div className="space-y-3">
+                                <p className="text-[10px] font-black text-primary/30 dark:text-slate-600 uppercase tracking-[0.2em]">Domicilio Fiscal</p>
+                                <div className="space-y-1">
+                                  <p className="text-xs font-bold text-slate-500 dark:text-slate-400">Dirección</p>
+                                  <p className="text-sm font-black text-primary dark:text-white">{client?.address || 'No registrado'}</p>
+                                </div>
+                                <div className="space-y-1">
+                                  <p className="text-xs font-bold text-slate-500 dark:text-slate-400">Ciudad / Provincia</p>
+                                  <p className="text-sm font-black text-primary dark:text-white">{client?.city ? `${client.city}, ${client.province}` : 'No registrado'}</p>
+                                </div>
+                              </div>
+
+                              <div className="space-y-3">
+                                <p className="text-[10px] font-black text-primary/30 dark:text-slate-600 uppercase tracking-[0.2em]">Detalle del Pago</p>
+                                <div className="space-y-1">
+                                  <p className="text-xs font-bold text-slate-500 dark:text-slate-400">Fecha de Pago</p>
+                                  <p className="text-sm font-black text-primary dark:text-white">
+                                    {invoice.paymentDate ? format(parseISO(invoice.paymentDate), "EEEE d 'de' MMMM, yyyy", { locale: es }) : 'No registrado'}
+                                  </p>
+                                </div>
+                                <div className="space-y-1">
+                                  <p className="text-xs font-bold text-slate-500 dark:text-slate-400">Cuenta / Método</p>
+                                  <p className="text-sm font-black text-secondary uppercase">{invoice.paymentMethod}</p>
+                                </div>
+                                {invoice.exchangeRate && (
+                                  <div className="space-y-1">
+                                    <p className="text-xs font-bold text-slate-500 dark:text-slate-400">Tipo de Cambio</p>
+                                    <p className="text-sm font-black text-primary dark:text-white">1 USD = {invoice.exchangeRate.toLocaleString(undefined, { minimumFractionDigits: settings?.decimals || 0, maximumFractionDigits: settings?.decimals || 0 })} ARS</p>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+      </Card>
     </div>
   );
 }
@@ -2769,7 +3146,8 @@ function CashflowView({
   payments,
   staff,
   searchTerm,
-  setSearchTerm
+  setSearchTerm,
+  generateCommissions
 }: { 
   cashflow: CashflowEntry[]; 
   isAdding: boolean; 
@@ -2779,6 +3157,7 @@ function CashflowView({
   staff: StaffMember[];
   searchTerm: string;
   setSearchTerm: (v: string) => void;
+  generateCommissions: (amountUSD: number, clientId: string, paymentId: string, date: string) => Promise<void>;
 }) {
   const settings = React.useContext(SettingsContext);
   const formatCurrency = useCurrency();
@@ -2883,48 +3262,7 @@ function CashflowView({
 
         if (client) {
           // Calculate and add commissions
-          if (client.setterId) {
-            const setter = staff.find(s => s.id === client.setterId);
-            if (setter) {
-              const commissionAmount = (amountUSD * (client.setterCommissionPct || 0)) / 100;
-              if (commissionAmount > 0) {
-                await addDoc(collection(db, 'commissions'), {
-                  staffId: setter.id,
-                  staffName: setter.name,
-                  clientId: client.id,
-                  clientName: `${client.firstName} ${client.lastName}`,
-                  paymentId: paymentId,
-                  amountUSD: commissionAmount,
-                  percentage: client.setterCommissionPct || 0,
-                  staffRole: 'setter',
-                  status: 'pending',
-                  date: date,
-                  createdAt: new Date().toISOString()
-                });
-              }
-            }
-          }
-          if (client.closerId) {
-            const closer = staff.find(s => s.id === client.closerId);
-            if (closer) {
-              const commissionAmount = (amountUSD * (client.closerCommissionPct || 0)) / 100;
-              if (commissionAmount > 0) {
-                await addDoc(collection(db, 'commissions'), {
-                  staffId: closer.id,
-                  staffName: closer.name,
-                  clientId: client.id,
-                  clientName: `${client.firstName} ${client.lastName}`,
-                  paymentId: paymentId,
-                  amountUSD: commissionAmount,
-                  percentage: client.closerCommissionPct || 0,
-                  staffRole: 'closer',
-                  status: 'pending',
-                  date: date,
-                  createdAt: new Date().toISOString()
-                });
-              }
-            }
-          }
+          await generateCommissions(amountUSD, clientId || payment?.clientId || '', paymentId, date);
         }
       }
 
@@ -3454,6 +3792,103 @@ function PayrollView({
   const [activeSubTab, setActiveSubTab] = useState<'salaries' | 'commissions' | 'staff'>('salaries');
   const [isEditingPayrollDay, setIsEditingPayrollDay] = useState(false);
 
+  const commissionsByStaff = useMemo(() => {
+    const pending = commissions.filter(c => c.status === 'pending');
+    const grouped: { [key: string]: { staffName: string; staffId: string; total: number; count: number; commissions: Commission[] } } = {};
+    
+    pending.forEach(c => {
+      if (!grouped[c.staffId]) {
+        grouped[c.staffId] = { staffName: c.staffName, staffId: c.staffId, total: 0, count: 0, commissions: [] };
+      }
+      grouped[c.staffId].total += c.amountUSD;
+      grouped[c.staffId].count += 1;
+      grouped[c.staffId].commissions.push(c);
+    });
+    
+    return Object.values(grouped);
+  }, [commissions]);
+
+  const lastMonthCommissions = useMemo(() => {
+    const lastMonth = subMonths(new Date(), 1);
+    const startOfLastMonth = startOfMonth(lastMonth);
+    const endOfLastMonth = endOfMonth(lastMonth);
+    
+    const pendingLastMonth = commissions.filter(c => {
+      if (c.status !== 'pending') return false;
+      const commissionDate = parseISO(c.date);
+      return (isAfter(commissionDate, startOfLastMonth) || c.date === format(startOfLastMonth, 'yyyy-MM-dd')) && 
+             (isBefore(commissionDate, endOfLastMonth) || c.date === format(endOfLastMonth, 'yyyy-MM-dd'));
+    });
+
+    const grouped: { [key: string]: { staffName: string; staffId: string; total: number; count: number; commissions: Commission[] } } = {};
+    
+    pendingLastMonth.forEach(c => {
+      if (!grouped[c.staffId]) {
+        grouped[c.staffId] = { staffName: c.staffName, staffId: c.staffId, total: 0, count: 0, commissions: [] };
+      }
+      grouped[c.staffId].total += c.amountUSD;
+      grouped[c.staffId].count += 1;
+      grouped[c.staffId].commissions.push(c);
+    });
+    
+    return Object.values(grouped);
+  }, [commissions]);
+
+  const currentMonthCommissions = useMemo(() => {
+    const startOfCurrentMonth = startOfMonth(new Date());
+    const endOfCurrentMonth = endOfMonth(new Date());
+    
+    const pendingCurrentMonth = commissions.filter(c => {
+      if (c.status !== 'pending') return false;
+      const commissionDate = parseISO(c.date);
+      return (isAfter(commissionDate, startOfCurrentMonth) || c.date === format(startOfCurrentMonth, 'yyyy-MM-dd')) && 
+             (isBefore(commissionDate, endOfCurrentMonth) || c.date === format(endOfCurrentMonth, 'yyyy-MM-dd'));
+    });
+
+    const grouped: { [key: string]: { staffName: string; staffId: string; total: number; count: number; commissions: Commission[] } } = {};
+    
+    pendingCurrentMonth.forEach(c => {
+      if (!grouped[c.staffId]) {
+        grouped[c.staffId] = { staffName: c.staffName, staffId: c.staffId, total: 0, count: 0, commissions: [] };
+      }
+      grouped[c.staffId].total += c.amountUSD;
+      grouped[c.staffId].count += 1;
+      grouped[c.staffId].commissions.push(c);
+    });
+    
+    return Object.values(grouped);
+  }, [commissions]);
+
+  const handlePayMultipleCommissions = async (staffId: string, staffName: string, commissionsToPay: Commission[], period: 'last' | 'current' | 'all' = 'last') => {
+    const totalAmount = commissionsToPay.reduce((acc, c) => acc + c.amountUSD, 0);
+    const dateForPeriod = period === 'last' ? subMonths(new Date(), 1) : new Date();
+    const periodLabel = period === 'all' ? 'Todas las pendientes' : format(dateForPeriod, 'MMMM yyyy', { locale: es });
+
+    try {
+      const batchPromises = commissionsToPay.map(c => 
+        updateDoc(doc(db, 'commissions', c.id!), {
+          status: 'paid',
+          paidAt: new Date().toISOString()
+        })
+      );
+      await Promise.all(batchPromises);
+
+      await addDoc(collection(db, 'cashflow'), {
+        type: 'expense',
+        amountUSD: totalAmount,
+        category: 'Comisiones',
+        date: format(new Date(), 'yyyy-MM-dd'),
+        description: `Pago Comisiones Acumuladas (${periodLabel}) - ${staffName}`,
+        createdAt: new Date().toISOString()
+      });
+      
+      toast.success(`Se pagaron ${commissionsToPay.length} comisiones por un total de ${formatCurrency(totalAmount)}`);
+    } catch (err) {
+      console.error("Error paying multiple commissions:", err);
+      toast.error('Error al procesar el pago de comisiones');
+    }
+  };
+
   const handleUpdatePayrollDay = async (day: number) => {
     if (!settings) return;
     try {
@@ -3597,20 +4032,114 @@ function PayrollView({
           <div className="flex items-center justify-between">
             <h3 className="text-lg font-black text-primary uppercase italic tracking-tight">Comisiones por <span className="text-secondary">Venta</span></h3>
             <div className="flex items-center gap-2">
-              <span className="text-[10px] font-black text-primary/40 uppercase tracking-widest">Pendientes:</span>
+              <span className="text-[10px] font-black text-primary/40 uppercase tracking-widest">Total Pendiente:</span>
               <span className="text-sm font-black text-secondary italic">{formatCurrency(pendingCommissions.reduce((acc, c) => acc + c.amountUSD, 0))}</span>
             </div>
           </div>
 
-          {pendingCommissions.length === 0 ? (
-            <Card className="p-12 text-center border-slate-100 dark:border-slate-700">
-              <Star className="w-12 h-12 text-primary/10 dark:text-primary/20 mx-auto mb-4" />
-              <p className="text-primary/40 dark:text-primary/60 font-medium italic">No hay comisiones pendientes.</p>
-            </Card>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {pendingCommissions.map(c => (
-                <Card key={c.id} className="p-5 border-none shadow-xl shadow-primary/5 space-y-4 group">
+          {/* Summary Section - New */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+            <div className="space-y-4">
+              <h4 className="text-xs font-black text-primary/40 uppercase tracking-[0.2em]">Liquidación: Mes Anterior ({format(subMonths(new Date(), 1), 'MMMM', { locale: es })})</h4>
+              {lastMonthCommissions.length === 0 ? (
+                <Card className="p-6 bg-neutral/50 dark:bg-slate-800/30 border-dashed border-2 border-primary/5 dark:border-slate-700 flex items-center justify-center">
+                  <p className="text-xs font-bold text-slate-400 italic">No hay comisiones del mes anterior para liquidar.</p>
+                </Card>
+              ) : (
+                <div className="grid grid-cols-1 gap-4">
+                  {lastMonthCommissions.map(group => (
+                    <Card key={group.staffId} className="p-6 bg-primary text-white border-none shadow-xl shadow-primary/20 flex flex-col justify-between">
+                      <div>
+                        <div className="flex items-center justify-between mb-4">
+                          <div className="w-10 h-10 bg-white/10 rounded-xl flex items-center justify-center">
+                            <TrendingUp className="w-5 h-5 text-secondary" />
+                          </div>
+                          <span className="text-[10px] font-black uppercase tracking-widest bg-white/10 px-2 py-1 rounded-lg">
+                            {group.count} Ventas
+                          </span>
+                        </div>
+                        <p className="text-sm font-black tracking-tight mb-1">{group.staffName}</p>
+                        <p className="text-2xl font-black italic text-secondary">{formatCurrency(group.total)}</p>
+                      </div>
+                      <Button 
+                        variant="secondary" 
+                        className="mt-6 w-full py-3 text-xs font-black uppercase tracking-widest"
+                        onClick={() => handlePayMultipleCommissions(group.staffId, group.staffName, group.commissions, 'last')}
+                      >
+                        Liquidar Mes Anterior
+                      </Button>
+                    </Card>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="space-y-4">
+              <h4 className="text-xs font-black text-primary/40 uppercase tracking-[0.2em]">Acumulado: Mes Actual ({format(new Date(), 'MMMM', { locale: es })})</h4>
+              {currentMonthCommissions.length === 0 ? (
+                <Card className="p-6 bg-neutral/50 dark:bg-slate-800/30 border-dashed border-2 border-primary/5 dark:border-slate-700 flex items-center justify-center">
+                  <p className="text-xs font-bold text-slate-400 italic">No hay comisiones acumuladas en este mes aún.</p>
+                </Card>
+              ) : (
+                <div className="grid grid-cols-1 gap-4">
+                  {currentMonthCommissions.map(group => (
+                    <Card key={group.staffId} className="p-6 bg-white dark:bg-slate-800/50 border border-primary/10 dark:border-slate-700 shadow-xl shadow-primary/5 flex flex-col justify-between">
+                      <div>
+                        <div className="flex items-center justify-between mb-4">
+                          <div className="w-10 h-10 bg-primary/5 dark:bg-slate-700 rounded-xl flex items-center justify-center">
+                            <TrendingUp className="w-5 h-5 text-primary dark:text-secondary" />
+                          </div>
+                          <span className="text-[10px] font-black uppercase tracking-widest bg-primary/5 dark:bg-slate-700 px-2 py-1 rounded-lg text-primary dark:text-secondary">
+                            {group.count} Ventas
+                          </span>
+                        </div>
+                        <p className="text-sm font-black tracking-tight mb-1 text-primary dark:text-white">{group.staffName}</p>
+                        <p className="text-2xl font-black italic text-secondary">{formatCurrency(group.total)}</p>
+                      </div>
+                      <Button 
+                        variant="tertiary" 
+                        className="mt-6 w-full py-3 text-xs font-black uppercase tracking-widest"
+                        onClick={() => handlePayMultipleCommissions(group.staffId, group.staffName, group.commissions, 'current')}
+                      >
+                        Liquidar Mes Actual (Adelanto)
+                      </Button>
+                    </Card>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* General Summary Section - Added to satisfy user request for current month too */}
+          <div className="space-y-4">
+            <h4 className="text-xs font-black text-primary/40 uppercase tracking-[0.2em]">Total Pendiente por Integrante (Histórico)</h4>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+              {commissionsByStaff.map(group => (
+                <Card key={group.staffId} className="p-4 bg-white dark:bg-slate-800/50 border border-primary/5 dark:border-slate-700 shadow-sm">
+                  <p className="text-[10px] font-black text-primary/40 uppercase tracking-widest mb-1">{group.staffName}</p>
+                  <div className="flex items-end justify-between">
+                    <p className="text-xl font-black text-primary dark:text-secondary italic">{formatCurrency(group.total)}</p>
+                    <p className="text-[9px] font-bold text-secondary uppercase">{group.count} pendientes</p>
+                  </div>
+                </Card>
+              ))}
+              {commissionsByStaff.length === 0 && (
+                <p className="text-xs font-bold text-slate-400 italic col-span-full">No hay comisiones pendientes en total.</p>
+              )}
+            </div>
+          </div>
+
+          <div className="space-y-4">
+            <h4 className="text-xs font-black text-primary/40 uppercase tracking-[0.2em]">Detalle de Comisiones Pendientes</h4>
+            {pendingCommissions.length === 0 ? (
+              <Card className="p-12 text-center border-slate-100 dark:border-slate-700">
+                <Star className="w-12 h-12 text-primary/10 dark:text-primary/20 mx-auto mb-4" />
+                <p className="text-primary/40 dark:text-primary/60 font-medium italic">No hay comisiones individuales pendientes.</p>
+              </Card>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {pendingCommissions.map(c => (
+                  <Card key={c.id} className="p-5 border-none shadow-xl shadow-primary/5 space-y-4 group bg-white dark:bg-slate-800/50">
                   <div className="flex justify-between items-start">
                     <div>
                       <div className="flex items-center gap-2">
@@ -3644,6 +4173,7 @@ function PayrollView({
               ))}
             </div>
           )}
+        </div>
 
           {/* Paid Commissions History */}
           {paidCommissions.length > 0 && (

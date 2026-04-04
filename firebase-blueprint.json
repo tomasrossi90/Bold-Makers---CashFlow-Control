@@ -10,6 +10,8 @@
         "lastName": { "type": "string", "description": "Client's last name." },
         "dni": { "type": "string", "description": "National ID (DNI)." },
         "cuil": { "type": "string", "description": "Tax ID (CUIL)." },
+        "cuit": { "type": "string", "description": "Tax ID (CUIT)." },
+        "phone": { "type": "string", "description": "Phone number." },
         "email": { "type": "string", "description": "Email address." },
         "businessName": { "type": "string", "description": "Business or Reason Social." },
         "address": { "type": "string", "description": "Home address." },
@@ -38,6 +40,10 @@
         "dueDate": { "type": "string", "format": "date-time", "description": "Due date for this installment." },
         "paymentMethod": { "type": "string", "enum": ["Mercury", "Stripe", "Santander Argentina", "Belo Argentina"], "description": "Method used for payment." },
         "status": { "type": "string", "enum": ["paid", "pending"], "description": "Status of the payment." },
+        "invoiceStatus": { "type": "string", "enum": ["pending", "completed", "not_required"], "description": "Status of the invoice." },
+        "invoiceType": { "type": "string", "enum": ["arca", "receipt"], "description": "Type of invoice (manual ARCA or automatic Receipt)." },
+        "invoiceUrl": { "type": "string", "description": "URL to the invoice document." },
+        "invoiceNumber": { "type": "string", "description": "Invoice number." },
         "createdAt": { "type": "string", "format": "date-time", "description": "Creation timestamp." }
       },
       "required": ["clientId", "amountUSD", "status"]
