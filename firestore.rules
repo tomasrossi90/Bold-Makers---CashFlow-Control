@@ -18,6 +18,12 @@ service cloud.firestore {
     //
     // Collection: payroll
     // Fields: staffId, staffName, amountUSD, date, period, paymentMethod, createdAt
+    //
+    // Collection: commissions
+    // Fields: staffId, staffName, clientId, clientName, paymentId, amountUSD, percentage, staffRole, status, date, createdAt
+    //
+    // Collection: settings
+    // Fields: currency, decimals, theme, paymentMethods, updatedAt, payrollDay, defaultSetterCommissionPct, defaultCloserCommissionPct
     // ===============================================================
 
     // Helper Functions
@@ -25,57 +31,136 @@ service cloud.firestore {
       return request.auth != null;
     }
 
-    function isOwner(email) {
-      return isAuthenticated() && request.auth.token.email == email;
-    }
-
-    // Since this is a shared business app for the user and his wife,
-    // we'll allow access to authenticated users (the owners).
-    // In a real production app, we'd use roles or a specific user list.
-    // For now, we'll restrict to the user's email provided in context.
     function isAuthorized() {
       return isAuthenticated() && (
-        request.auth.token.email == "tomas.rossi190@gmail.com"
+        request.auth.token.email == "tomas.rossi190@gmail.com" ||
+        request.auth.token.email_verified == true
       );
     }
 
-    // Validation Functions
+    function hasRequiredFields(fields) {
+      return request.resource.data.keys().hasAll(fields);
+    }
+
+    function hasOnlyAllowedFields(fields) {
+      return request.resource.data.keys().hasOnly(fields);
+    }
+
+    function areImmutableFieldsUnchanged(fields) {
+      return !request.resource.data.diff(resource.data).affectedKeys().hasAny(fields);
+    }
+
+    function isValidString(field, min, max) {
+      return request.resource.data[field] is string && 
+             request.resource.data[field].size() >= min && 
+             request.resource.data[field].size() <= max;
+    }
+
+    function isValidNumber(field, min, max) {
+      return request.resource.data[field] is number && 
+             request.resource.data[field] >= min && 
+             request.resource.data[field] <= max;
+    }
+
+    // Domain Validators
     function isValidClient(data) {
-      return data.firstName is string && data.firstName.size() > 0 &&
+      return hasRequiredFields(['firstName', 'lastName', 'totalAmountUSD', 'installments', 'createdAt']) &&
+             data.firstName is string && data.firstName.size() > 0 &&
              data.lastName is string && data.lastName.size() > 0 &&
              data.totalAmountUSD is number && data.totalAmountUSD >= 0 &&
-             data.installments is number && data.installments >= 1 && data.installments <= 6;
+             data.installments is number && data.installments >= 1;
     }
 
     function isValidPayment(data) {
-      return data.clientId is string &&
+      return hasRequiredFields(['clientId', 'installmentNumber', 'amountUSD', 'status', 'dueDate', 'createdAt']) &&
+             data.clientId is string &&
+             data.installmentNumber is number &&
              data.amountUSD is number && data.amountUSD >= 0 &&
              data.status in ['paid', 'pending'];
     }
 
     function isValidCashflow(data) {
-      return data.type in ['income', 'expense'] &&
+      return hasRequiredFields(['type', 'amountUSD', 'category', 'date', 'description', 'createdAt']) &&
+             data.type in ['income', 'expense'] &&
+             data.amountUSD is number && data.amountUSD >= 0 &&
+             data.category is string &&
+             data.date is string &&
+             data.description is string && data.description.size() <= 500;
+    }
+
+    function isValidStaff(data) {
+      return hasRequiredFields(['name', 'role', 'type', 'baseSalaryUSD', 'createdAt']) &&
+             data.name is string && data.name.size() > 0 &&
+             data.role is string &&
+             data.type in ['setter', 'closer', 'other'] &&
+             data.baseSalaryUSD is number && data.baseSalaryUSD >= 0;
+    }
+
+    function isValidPayroll(data) {
+      return hasRequiredFields(['staffId', 'staffName', 'amountUSD', 'date', 'period', 'createdAt']) &&
+             data.staffId is string &&
              data.amountUSD is number && data.amountUSD >= 0;
     }
 
+    function isValidCommission(data) {
+      return hasRequiredFields(['staffId', 'clientId', 'amountUSD', 'status', 'createdAt']) &&
+             data.status in ['paid', 'pending'] &&
+             data.amountUSD is number && data.amountUSD >= 0;
+    }
+
+    function isValidSettings(data) {
+      return hasRequiredFields(['currency', 'decimals', 'paymentMethods']) &&
+             data.currency in ['USD', 'ARS', 'EUR'] &&
+             data.decimals is number && data.decimals >= 0 && data.decimals <= 2 &&
+             data.paymentMethods is list;
+    }
+
     match /clients/{clientId} {
-      allow read, write: if isAuthorized();
+      allow read: if isAuthorized();
+      allow create: if isAuthorized() && isValidClient(request.resource.data);
+      allow update: if isAuthorized() && isValidClient(request.resource.data) && areImmutableFieldsUnchanged(['createdAt']);
+      allow delete: if isAuthorized();
     }
 
     match /payments/{paymentId} {
-      allow read, write: if isAuthorized();
+      allow read: if isAuthorized();
+      allow create: if isAuthorized() && isValidPayment(request.resource.data);
+      allow update: if isAuthorized() && isValidPayment(request.resource.data) && areImmutableFieldsUnchanged(['createdAt', 'clientId', 'installmentNumber']);
+      allow delete: if isAuthorized();
     }
 
     match /cashflow/{entryId} {
-      allow read, write: if isAuthorized();
+      allow read: if isAuthorized();
+      allow create: if isAuthorized() && isValidCashflow(request.resource.data);
+      allow update: if isAuthorized() && isValidCashflow(request.resource.data) && areImmutableFieldsUnchanged(['createdAt', 'type', 'amountUSD', 'date']);
+      allow delete: if isAuthorized();
     }
 
     match /staff/{staffId} {
-      allow read, write: if isAuthorized();
+      allow read: if isAuthorized();
+      allow create: if isAuthorized() && isValidStaff(request.resource.data);
+      allow update: if isAuthorized() && isValidStaff(request.resource.data) && areImmutableFieldsUnchanged(['createdAt']);
+      allow delete: if isAuthorized();
     }
 
     match /payroll/{payrollId} {
-      allow read, write: if isAuthorized();
+      allow read: if isAuthorized();
+      allow create: if isAuthorized() && isValidPayroll(request.resource.data);
+      allow update: if isAuthorized() && isValidPayroll(request.resource.data) && areImmutableFieldsUnchanged(['createdAt', 'staffId', 'amountUSD']);
+      allow delete: if isAuthorized();
+    }
+
+    match /commissions/{commissionId} {
+      allow read: if isAuthorized();
+      allow create: if isAuthorized() && isValidCommission(request.resource.data);
+      allow update: if isAuthorized() && isValidCommission(request.resource.data) && areImmutableFieldsUnchanged(['createdAt', 'staffId', 'clientId', 'amountUSD']);
+      allow delete: if isAuthorized();
+    }
+
+    match /settings/{userId} {
+      allow read: if isAuthorized();
+      allow create, update: if isAuthorized() && isValidSettings(request.resource.data);
+      allow delete: if isAuthorized();
     }
   }
 }

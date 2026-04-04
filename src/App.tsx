@@ -30,6 +30,7 @@ import {
   History,
   Check,
   Plus, 
+  RefreshCw,
   Trash2, 
   LogOut, 
   LogIn, 
@@ -237,6 +238,7 @@ export default function App() {
   const [isAddingStaff, setIsAddingStaff] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
   
   const [settings, setSettings] = useState<AppSettings>({
     currency: 'USD',
@@ -274,6 +276,48 @@ export default function App() {
   const deletedClients = useMemo(() => clients.filter(c => c.deletedAt), [clients]);
   const activePayments = useMemo(() => payments.filter(p => !p.deletedAt), [payments]);
   const activeStaff = useMemo(() => staff.filter(s => !s.deletedAt), [staff]);
+
+  const filteredClients = useMemo(() => {
+    if (!searchTerm) return activeClients;
+    const s = searchTerm.toLowerCase();
+    return activeClients.filter(c => 
+      c.firstName.toLowerCase().includes(s) || 
+      c.lastName.toLowerCase().includes(s) || 
+      (c.businessName && c.businessName.toLowerCase().includes(s)) ||
+      (c.dni && c.dni.includes(s)) ||
+      (c.cuil && c.cuil.includes(s))
+    );
+  }, [activeClients, searchTerm]);
+
+  const filteredStaff = useMemo(() => {
+    if (!searchTerm) return activeStaff;
+    const st = searchTerm.toLowerCase();
+    return activeStaff.filter(s => 
+      s.name.toLowerCase().includes(st) || 
+      s.role.toLowerCase().includes(st) || 
+      (s.email && s.email.toLowerCase().includes(st))
+    );
+  }, [activeStaff, searchTerm]);
+
+  const filteredCashflow = useMemo(() => {
+    if (!searchTerm) return cashflow;
+    const s = searchTerm.toLowerCase();
+    return cashflow.filter(c => 
+      c.description.toLowerCase().includes(s) || 
+      c.category.toLowerCase().includes(s) ||
+      c.amountUSD.toString().includes(s)
+    );
+  }, [cashflow, searchTerm]);
+
+  const filteredPayments = useMemo(() => {
+    if (!searchTerm) return activePayments;
+    const s = searchTerm.toLowerCase();
+    return activePayments.filter(p => 
+      p.clientName?.toLowerCase().includes(s) || 
+      p.installmentNumber.toString().includes(s) ||
+      p.amountUSD.toString().includes(s)
+    );
+  }, [activePayments, searchTerm]);
 
   const notifications = useMemo(() => {
     const now = new Date();
@@ -321,38 +365,38 @@ export default function App() {
     const qClients = query(collection(db, 'clients'), orderBy('createdAt', 'desc'));
     const unsubClients = onSnapshot(qClients, (snap) => {
       setClients(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Client)));
-    });
+    }, (err) => handleFirestoreError(err, OperationType.GET, 'clients'));
 
     const qPayments = query(collection(db, 'payments'), orderBy('dueDate', 'asc'));
     const unsubPayments = onSnapshot(qPayments, (snap) => {
       setPayments(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Payment)));
-    });
+    }, (err) => handleFirestoreError(err, OperationType.GET, 'payments'));
 
     const qCashflow = query(collection(db, 'cashflow'), orderBy('date', 'desc'));
     const unsubCashflow = onSnapshot(qCashflow, (snap) => {
       setCashflow(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as CashflowEntry)));
-    });
+    }, (err) => handleFirestoreError(err, OperationType.GET, 'cashflow'));
 
     const qStaff = query(collection(db, 'staff'), orderBy('createdAt', 'desc'));
     const unsubStaff = onSnapshot(qStaff, (snap) => {
       setStaff(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as StaffMember)));
-    });
+    }, (err) => handleFirestoreError(err, OperationType.GET, 'staff'));
 
     const qPayroll = query(collection(db, 'payroll'), orderBy('date', 'desc'));
     const unsubPayroll = onSnapshot(qPayroll, (snap) => {
       setPayroll(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as PayrollPayment)));
-    });
+    }, (err) => handleFirestoreError(err, OperationType.GET, 'payroll'));
 
     const qCommissions = query(collection(db, 'commissions'), orderBy('date', 'desc'));
     const unsubCommissions = onSnapshot(qCommissions, (snap) => {
       setCommissions(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Commission)));
-    });
+    }, (err) => handleFirestoreError(err, OperationType.GET, 'commissions'));
 
     const unsubSettings = onSnapshot(doc(db, 'settings', user.uid), (snap) => {
       if (snap.exists()) {
         setSettings(snap.data() as AppSettings);
       }
-    });
+    }, (err) => handleFirestoreError(err, OperationType.GET, `settings/${user.uid}`));
 
     return () => {
       unsubClients();
@@ -602,6 +646,9 @@ export default function App() {
               <LogOut className="w-4 h-4" />
               {!isSidebarCollapsed && <span>Cerrar Sesión</span>}
             </button>
+            <div className={cn("pt-4 text-center", isSidebarCollapsed ? "px-0" : "px-4")}>
+              <span className="text-[9px] font-black text-slate-300 dark:text-slate-700 uppercase tracking-[0.3em]">v1.0.3 PROD</span>
+            </div>
           </div>
         </div>
       </aside>
@@ -624,7 +671,9 @@ export default function App() {
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
               <input 
                 type="text" 
-                placeholder="Buscar transacción..." 
+                placeholder="Buscar clientes, empleados o transacciones..." 
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
                 className="pl-10 pr-4 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-700 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 w-64 dark:text-slate-200"
               />
             </div>
@@ -703,13 +752,13 @@ export default function App() {
         </header>
 
         <div className="p-8 bg-slate-50 dark:bg-slate-950">
-          {activeTab === 'dashboard' && <DashboardView clients={activeClients} payments={activePayments} cashflow={cashflow} />}
-          {activeTab === 'clients' && <ClientsView clients={activeClients} isAdding={isAddingClient} setIsAdding={setIsAddingClient} payments={payments} cashflow={cashflow} staff={activeStaff} settings={settings} />}
-          {activeTab === 'payments' && <PaymentsView clients={activeClients} payments={activePayments} />}
-          {activeTab === 'cashflow' && <CashflowView cashflow={cashflow} isAdding={isAddingCashflow} setIsAdding={setIsAddingCashflow} clients={activeClients} payments={activePayments} staff={activeStaff} />}
-          {activeTab === 'payroll' && <PayrollView staff={activeStaff} payroll={payroll} commissions={commissions} isAddingStaff={isAddingStaff} setIsAddingStaff={setIsAddingStaff} />}
+          {activeTab === 'dashboard' && <DashboardView clients={filteredClients} payments={filteredPayments} cashflow={filteredCashflow} onNavigate={setActiveTab} />}
+          {activeTab === 'clients' && <ClientsView clients={filteredClients} isAdding={isAddingClient} setIsAdding={setIsAddingClient} payments={payments} cashflow={cashflow} staff={activeStaff} settings={settings} searchTerm={searchTerm} setSearchTerm={setSearchTerm} />}
+          {activeTab === 'payments' && <PaymentsView clients={filteredClients} payments={filteredPayments} searchTerm={searchTerm} setSearchTerm={setSearchTerm} />}
+          {activeTab === 'cashflow' && <CashflowView cashflow={filteredCashflow} isAdding={isAddingCashflow} setIsAdding={setIsAddingCashflow} clients={activeClients} payments={activePayments} staff={activeStaff} />}
+          {activeTab === 'payroll' && <PayrollView staff={filteredStaff} payroll={payroll} commissions={commissions} isAddingStaff={isAddingStaff} setIsAddingStaff={setIsAddingStaff} setSettings={setSettings} user={user!} />}
           {activeTab === 'trash' && <TrashView clients={deletedClients} payments={payments} />}
-          {activeTab === 'reports' && <ReportsView cashflow={cashflow} clients={activeClients} payments={activePayments} commissions={commissions} staff={activeStaff} />}
+          {activeTab === 'reports' && <ReportsView cashflow={filteredCashflow} clients={filteredClients} payments={filteredPayments} commissions={commissions} staff={filteredStaff} />}
           {activeTab === 'settings' && <SettingsView settings={settings} setSettings={setSettings} user={user!} />}
         </div>
       </main>
@@ -744,7 +793,7 @@ function NavItem({ active, onClick, icon, label, collapsed }: { active: boolean;
 
 // --- Dashboard View ---
 
-function DashboardView({ clients, payments, cashflow }: { clients: Client[]; payments: Payment[]; cashflow: CashflowEntry[] }) {
+function DashboardView({ clients, payments, cashflow, onNavigate }: { clients: Client[]; payments: Payment[]; cashflow: CashflowEntry[]; onNavigate: (tab: any) => void }) {
   const formatCurrency = useCurrency();
   const [segmentation, setSegmentation] = useState<'weekly' | 'monthly' | 'quarterly' | 'semiannually' | 'annually'>('monthly');
   const [chartType, setChartType] = useState<'area' | 'bar'>('bar');
@@ -825,9 +874,15 @@ function DashboardView({ clients, payments, cashflow }: { clients: Client[]; pay
         .filter(e => e.type === 'expense' && (isAfter(parseISO(e.date), p.start) || e.date === format(p.start, 'yyyy-MM-dd')) && (isBefore(parseISO(e.date), p.end) || e.date === format(p.end, 'yyyy-MM-dd')))
         .reduce((acc, e) => acc + e.amountUSD, 0);
 
-      return { name: p.label, ingresos: income, egresos: expenses, profit: income - expenses };
+      const acquiredClients = clients.filter(c => {
+        const createdDate = parseISO(c.createdAt);
+        return (isAfter(createdDate, p.start) || c.createdAt.startsWith(format(p.start, 'yyyy-MM-dd'))) && 
+               (isBefore(createdDate, p.end) || c.createdAt.startsWith(format(p.end, 'yyyy-MM-dd')));
+      }).length;
+
+      return { name: p.label, ingresos: income, egresos: expenses, profit: income - expenses, clientes: acquiredClients };
     });
-  }, [cashflow, segmentation]);
+  }, [cashflow, clients, segmentation]);
 
   const pieData = useMemo(() => {
     const total = stats.monthlyIncome || 1; // Avoid division by zero
@@ -855,7 +910,7 @@ function DashboardView({ clients, payments, cashflow }: { clients: Client[]; pay
                   <span className="text-[11px] font-bold text-slate-600 dark:text-slate-400 uppercase tracking-tight">{entry.name}</span>
                 </div>
                 <span className="text-sm font-black text-primary dark:text-secondary">
-                  {formatCurrency(entry.value)}
+                  {entry.name === 'Clientes' ? entry.value : formatCurrency(entry.value)}
                 </span>
               </div>
             ))}
@@ -1138,10 +1193,84 @@ function DashboardView({ clients, payments, cashflow }: { clients: Client[]; pay
         </Card>
       </div>
 
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+        <Card className="lg:col-span-2 p-8 border-none">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-8 gap-4">
+            <div>
+              <h3 className="text-lg font-bold text-slate-800 dark:text-slate-100">Clientes Adquiridos</h3>
+              <p className="text-xs text-slate-400">Nuevos clientes por periodo seleccionado</p>
+            </div>
+            <div className="flex items-center gap-2 bg-slate-50 dark:bg-slate-800/50 p-1.5 rounded-xl border border-slate-100 dark:border-slate-700">
+              <Users className="w-4 h-4 text-primary dark:text-secondary ml-1" />
+              <span className="text-xs font-black text-slate-600 dark:text-slate-300 pr-2 uppercase tracking-widest">
+                Total: {chartData.reduce((acc, curr) => acc + (curr.clientes || 0), 0)}
+              </span>
+            </div>
+          </div>
+          <div className="h-[240px] w-full">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={chartData}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                <XAxis 
+                  dataKey="name" 
+                  axisLine={false} 
+                  tickLine={false} 
+                  tick={{ fill: '#94a3b8', fontSize: 10, fontWeight: 700 }}
+                  dy={10}
+                />
+                <YAxis 
+                  axisLine={false} 
+                  tickLine={false} 
+                  tick={{ fill: '#94a3b8', fontSize: 10, fontWeight: 700 }}
+                />
+                <Tooltip content={<CustomTooltip />} cursor={{ fill: '#f8fafc' }} />
+                <Bar 
+                  dataKey="clientes" 
+                  name="Clientes" 
+                  fill="#001C35" 
+                  radius={[4, 4, 0, 0]} 
+                  barSize={32}
+                >
+                  {chartData.map((entry, index) => (
+                    <Cell 
+                      key={`cell-${index}`} 
+                      fill={entry.clientes > 0 ? '#001C35' : '#e2e8f0'} 
+                      className="transition-all duration-300 hover:opacity-80"
+                    />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </Card>
+
+        <Card className="p-8 border-none flex flex-col justify-center items-center text-center">
+          <div className="w-16 h-16 bg-primary/5 dark:bg-secondary/5 rounded-full flex items-center justify-center mb-4">
+            <Users className="w-8 h-8 text-primary dark:text-secondary" />
+          </div>
+          <h3 className="text-xl font-black text-slate-800 dark:text-slate-100 mb-2">
+            {chartData.reduce((acc, curr) => acc + (curr.clientes || 0), 0)}
+          </h3>
+          <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-6">Nuevos Clientes</p>
+          <div className="w-full h-1 bg-slate-50 dark:bg-slate-800 rounded-full overflow-hidden">
+            <div 
+              className="h-full bg-primary dark:bg-secondary transition-all duration-1000" 
+              style={{ width: `${Math.min(100, (chartData.reduce((acc, curr) => acc + (curr.clientes || 0), 0) / 10) * 100)}%` }}
+            />
+          </div>
+          <p className="text-[10px] text-slate-400 mt-4 italic">Meta mensual: 10 clientes</p>
+        </Card>
+      </div>
+
       <Card className="p-8 bento-card border-none">
         <div className="flex items-center justify-between mb-8">
           <h3 className="text-lg font-bold text-slate-800 dark:text-slate-100">Transacciones Recientes</h3>
-          <button className="text-xs font-bold text-primary dark:text-secondary hover:underline">Ver Historial Completo</button>
+          <button 
+            onClick={() => onNavigate('cashflow')}
+            className="text-xs font-bold text-primary dark:text-secondary hover:underline"
+          >
+            Ver Historial Completo
+          </button>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full">
@@ -1248,17 +1377,31 @@ function StatCard({ label, value, icon, trend, color }: { label: string; value: 
 
 // --- Clients View ---
 
-function ClientsView({ clients, isAdding, setIsAdding, payments, cashflow, staff, settings }: { clients: Client[]; isAdding: boolean; setIsAdding: (v: boolean) => void; payments: Payment[]; cashflow: CashflowEntry[]; staff: StaffMember[]; settings: AppSettings }) {
+function ClientsView({ 
+  clients, 
+  isAdding, 
+  setIsAdding, 
+  payments, 
+  cashflow, 
+  staff, 
+  settings,
+  searchTerm,
+  setSearchTerm
+}: { 
+  clients: Client[]; 
+  isAdding: boolean; 
+  setIsAdding: (v: boolean) => void; 
+  payments: Payment[]; 
+  cashflow: CashflowEntry[]; 
+  staff: StaffMember[]; 
+  settings: AppSettings;
+  searchTerm: string;
+  setSearchTerm: (v: string) => void;
+}) {
   const formatCurrency = useCurrency();
-  const [search, setSearch] = useState('');
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [editingClient, setEditingClient] = useState<Client | null>(null);
   const [viewingDetails, setViewingDetails] = useState<Client | null>(null);
-
-  const filteredClients = clients.filter(c => 
-    `${c.firstName} ${c.lastName}`.toLowerCase().includes(search.toLowerCase()) ||
-    c.email?.toLowerCase().includes(search.toLowerCase())
-  );
 
   const handleAddClient = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -1423,16 +1566,16 @@ function ClientsView({ clients, isAdding, setIsAdding, payments, cashflow, staff
         <Search className="w-5 h-5 text-secondary" />
         <input 
           type="text" 
-          placeholder="Buscar por nombre o email..." 
+          placeholder="Buscar por nombre, email, empresa o DNI/CUIL..." 
           className="flex-1 outline-none text-sm font-bold text-primary dark:text-white bg-transparent placeholder:text-primary/30 dark:placeholder:text-slate-500"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
         />
         <Filter className="w-5 h-5 text-primary/40" />
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-8">
-        {filteredClients.map(client => {
+        {clients.map(client => {
           const clientPayments = payments.filter(p => p.clientId === client.id && !p.deletedAt);
           const paidCount = clientPayments.filter(p => p.status === 'paid').length;
           const totalCount = client.installments;
@@ -1525,6 +1668,22 @@ function ClientsView({ clients, isAdding, setIsAdding, payments, cashflow, staff
                   <span>Ingreso: {format(parseISO(client.createdAt), 'dd/MM/yyyy')}</span>
                 </div>
               </div>
+              {(client.setterId || client.closerId) && (
+                <div className="flex flex-wrap gap-2">
+                  {client.setterId && (
+                    <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-primary/60 bg-secondary/5 px-3 py-1.5 rounded-full border border-secondary/10">
+                      <span className="text-secondary/70">Setter:</span>
+                      <span className="text-primary/80">{staff.find(s => s.id === client.setterId)?.name || 'Desconocido'}</span>
+                    </div>
+                  )}
+                  {client.closerId && (
+                    <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-primary/60 bg-primary/5 px-3 py-1.5 rounded-full border border-primary/10">
+                      <span className="text-primary/70">Closer:</span>
+                      <span className="text-primary/80">{staff.find(s => s.id === client.closerId)?.name || 'Desconocido'}</span>
+                    </div>
+                  )}
+                </div>
+              )}
               {client.comments && (
                 <p className="text-xs font-medium text-primary/50 dark:text-slate-400 italic bg-neutral dark:bg-slate-800/50 p-4 rounded-[16px] border border-primary/5 dark:border-slate-700">
                   "{client.comments}"
@@ -1729,6 +1888,22 @@ function ClientsView({ clients, isAdding, setIsAdding, payments, cashflow, staff
                         Cuotas: {paidCount}/{totalCount}
                       </span>
                     </div>
+                    {(viewingDetails.setterId || viewingDetails.closerId) && (
+                      <div className="flex flex-wrap gap-2 mt-2">
+                        {viewingDetails.setterId && (
+                          <div className="flex items-center gap-2 text-[9px] font-black uppercase tracking-widest text-primary/60 bg-secondary/5 px-2 py-1 rounded-full border border-secondary/10">
+                            <span className="text-secondary/70">Setter:</span>
+                            <span className="text-primary/80">{staff.find(s => s.id === viewingDetails.setterId)?.name || 'Desconocido'}</span>
+                          </div>
+                        )}
+                        {viewingDetails.closerId && (
+                          <div className="flex items-center gap-2 text-[9px] font-black uppercase tracking-widest text-primary/60 bg-primary/5 px-2 py-1 rounded-full border border-primary/10">
+                            <span className="text-primary/70">Closer:</span>
+                            <span className="text-primary/80">{staff.find(s => s.id === viewingDetails.closerId)?.name || 'Desconocido'}</span>
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </div>
                 <button onClick={() => setViewingDetails(null)} className="text-primary/40 hover:text-primary transition-colors">
@@ -1820,21 +1995,48 @@ function ClientsView({ clients, isAdding, setIsAdding, payments, cashflow, staff
 
 // --- Payments View ---
 
-function PaymentsView({ clients, payments }: { clients: Client[]; payments: Payment[] }) {
+function PaymentsView({ 
+  clients, 
+  payments,
+  searchTerm,
+  setSearchTerm
+}: { 
+  clients: Client[]; 
+  payments: Payment[];
+  searchTerm: string;
+  setSearchTerm: (v: string) => void;
+}) {
   const settings = React.useContext(SettingsContext);
   const formatCurrency = useCurrency();
   const [isPaying, setIsPaying] = useState<Payment | null>(null);
   const [arsRate, setArsRate] = useState(1200); // Default placeholder rate
   const [filterStatus, setFilterStatus] = useState<'all' | 'paid' | 'pending'>('all');
-  const [searchClient, setSearchClient] = useState('');
+  const [isLoadingRate, setIsLoadingRate] = useState(false);
+
+  useEffect(() => {
+    const fetchRate = async () => {
+      setIsLoadingRate(true);
+      try {
+        const response = await fetch('https://dolarapi.com/v1/dolares/oficial');
+        const data = await response.json();
+        if (data && data.venta) {
+          setArsRate(data.venta);
+        }
+      } catch (err) {
+        console.error("Error fetching exchange rate:", err);
+      } finally {
+        setIsLoadingRate(false);
+      }
+    };
+    fetchRate();
+  }, []);
 
   const filteredPayments = useMemo(() => {
     return payments.filter(p => {
       const matchesStatus = filterStatus === 'all' || p.status === filterStatus;
-      const matchesClient = p.clientName?.toLowerCase().includes(searchClient.toLowerCase());
-      return matchesStatus && matchesClient;
+      return matchesStatus;
     });
-  }, [payments, filterStatus, searchClient]);
+  }, [payments, filterStatus]);
 
   const handleProcessPayment = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -1906,10 +2108,10 @@ function PaymentsView({ clients, payments }: { clients: Client[]; payments: Paym
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
             <input 
               type="text" 
-              placeholder="Buscar cliente..." 
+              placeholder="Buscar cliente o monto..." 
               className="pl-10 pr-4 py-2 bg-white dark:bg-slate-800 border border-slate-100 dark:border-slate-700 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-primary/10 w-full sm:w-64 dark:text-white"
-              value={searchClient}
-              onChange={(e) => setSearchClient(e.target.value)}
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
             />
           </div>
           <select 
@@ -1935,7 +2137,7 @@ function PaymentsView({ clients, payments }: { clients: Client[]; payments: Paym
                 <th className="px-8 py-5 text-[10px] font-black text-primary/40 dark:text-slate-500 uppercase tracking-widest">Vencimiento</th>
                 <th className="px-8 py-5 text-[10px] font-black text-primary/40 dark:text-slate-500 uppercase tracking-widest">Monto (USD)</th>
                 <th className="px-8 py-5 text-[10px] font-black text-primary/40 dark:text-slate-500 uppercase tracking-widest">Estado</th>
-                <th className="px-8 py-5 text-[10px] font-black text-primary/40 dark:text-slate-500 uppercase tracking-widest text-right">Acción</th>
+                <th className="px-8 py-5 text-[10px] font-black text-primary/40 dark:text-slate-500 uppercase tracking-widest text-left">Acción</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-primary/5 dark:divide-slate-800">
@@ -1983,13 +2185,13 @@ function PaymentsView({ clients, payments }: { clients: Client[]; payments: Paym
                          (payment.paidAmountUSD && payment.paidAmountUSD > 0 ? 'Parcial' : 'Pendiente')}
                       </span>
                     </td>
-                    <td className="px-8 py-5 text-right">
+                    <td className="px-8 py-5 text-left">
                       {payment.status === 'pending' ? (
                         <Button variant="secondary" className="py-2 px-4 text-xs" onClick={() => setIsPaying(payment)}>
                           Registrar Pago
                         </Button>
                       ) : (
-                        <div className="flex items-center justify-end gap-2 text-xs font-bold text-primary/40">
+                        <div className="flex items-center justify-start gap-2 text-xs font-bold text-primary/40">
                           <CheckCircle className="w-4 h-4 text-green-500" />
                           {payment.paymentMethod}
                         </div>
@@ -2105,7 +2307,41 @@ function PaymentsView({ clients, payments }: { clients: Client[]; payments: Paym
               />
               
               <div className="p-6 bg-secondary/5 dark:bg-secondary/10 rounded-[24px] border border-secondary/10 dark:border-secondary/20 space-y-4">
-                <p className="text-[10px] font-black text-secondary uppercase tracking-widest">Conversor ARS a USD</p>
+                <div className="flex items-center justify-between">
+                  <p className="text-[10px] font-black text-secondary uppercase tracking-widest">Conversor ARS a USD</p>
+                  {isLoadingRate ? (
+                    <span className="text-[8px] font-bold text-secondary/40 animate-pulse">Actualizando...</span>
+                  ) : (
+                    <div className="flex items-center gap-2">
+                      <span className="text-[8px] font-bold text-secondary/60">Fuente: BNA (Oficial)</span>
+                      <button 
+                        type="button"
+                        onClick={() => {
+                          const fetchRate = async () => {
+                            setIsLoadingRate(true);
+                            try {
+                              const response = await fetch('https://dolarapi.com/v1/dolares/oficial');
+                              const data = await response.json();
+                              if (data && data.venta) {
+                                setArsRate(data.venta);
+                                toast.success('Tipo de cambio actualizado');
+                              }
+                            } catch (err) {
+                              console.error("Error fetching exchange rate:", err);
+                              toast.error('Error al actualizar el tipo de cambio');
+                            } finally {
+                              setIsLoadingRate(false);
+                            }
+                          };
+                          fetchRate();
+                        }}
+                        className="text-secondary/40 hover:text-secondary transition-colors"
+                      >
+                        <RefreshCw className="w-3 h-3" />
+                      </button>
+                    </div>
+                  )}
+                </div>
                 <Input 
                   label="Tipo de Cambio" 
                   name="exchangeRate" 
@@ -3026,13 +3262,17 @@ function PayrollView({
   payroll, 
   commissions,
   isAddingStaff, 
-  setIsAddingStaff 
+  setIsAddingStaff,
+  setSettings,
+  user
 }: { 
   staff: StaffMember[]; 
   payroll: PayrollPayment[];
   commissions: Commission[];
   isAddingStaff: boolean;
   setIsAddingStaff: (v: boolean) => void;
+  setSettings: React.Dispatch<React.SetStateAction<AppSettings>>;
+  user: User;
 }) {
   const settings = React.useContext(SettingsContext);
   const formatCurrency = useCurrency();
@@ -3175,6 +3415,21 @@ function PayrollView({
   const paidCommissions = commissions.filter(c => c.status === 'paid');
 
   const [activeSubTab, setActiveSubTab] = useState<'salaries' | 'commissions' | 'staff'>('salaries');
+  const [isEditingPayrollDay, setIsEditingPayrollDay] = useState(false);
+
+  const handleUpdatePayrollDay = async (day: number) => {
+    if (!settings) return;
+    try {
+      const newSettings = { ...settings, payrollDay: day, updatedAt: new Date().toISOString() };
+      await setDoc(doc(db, 'settings', user.uid), newSettings);
+      setSettings(newSettings);
+      setIsEditingPayrollDay(false);
+      toast.success(`Día de pago actualizado al ${day}`);
+    } catch (err) {
+      console.error("Error updating payroll day:", err);
+      toast.error('Error al actualizar el día de pago');
+    }
+  };
 
   return (
     <>
@@ -3232,11 +3487,40 @@ function PayrollView({
             <Card className="p-8 bento-card bg-white dark:bg-slate-800/50 border-none shadow-xl shadow-primary/5 col-span-2 flex items-center justify-between">
               <div>
                 <h4 className="text-sm font-black text-primary dark:text-secondary uppercase tracking-widest mb-2">Configuración de Vencimiento</h4>
-                <p className="text-xs text-slate-400 max-w-md">Los pagos a empleados están programados para el día {settings?.payrollDay || 5}. Puedes cambiar esto en los ajustes del sistema.</p>
+                <p className="text-xs text-slate-400 max-w-md">Los pagos a empleados están programados para el día {settings?.payrollDay || 5}.</p>
               </div>
-              <Button variant="secondary" onClick={() => (window as any).setActiveTab('settings')} className="text-xs py-2">
-                Cambiar Fecha
-              </Button>
+              <div className="flex items-center gap-3">
+                {isEditingPayrollDay ? (
+                  <div className="flex items-center gap-2 animate-in fade-in slide-in-from-right-2">
+                    <input 
+                      type="number" 
+                      min="1" 
+                      max="31" 
+                      defaultValue={settings?.payrollDay || 5}
+                      className="w-16 px-3 py-2 bg-neutral dark:bg-slate-800 border border-primary/10 dark:border-slate-700 rounded-lg text-sm font-bold text-primary dark:text-white outline-none focus:ring-2 focus:ring-secondary/20"
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          handleUpdatePayrollDay(parseInt((e.target as HTMLInputElement).value));
+                        }
+                      }}
+                      onBlur={(e) => {
+                        handleUpdatePayrollDay(parseInt(e.target.value));
+                      }}
+                      autoFocus
+                    />
+                    <button 
+                      onClick={() => setIsEditingPayrollDay(false)}
+                      className="text-primary/40 hover:text-primary p-2"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                ) : (
+                  <Button variant="secondary" onClick={() => setIsEditingPayrollDay(true)} className="text-xs py-2">
+                    Cambiar Fecha
+                  </Button>
+                )}
+              </div>
             </Card>
           </div>
 
