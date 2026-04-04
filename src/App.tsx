@@ -96,6 +96,22 @@ function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
+function ContextualSearch({ value, onChange, placeholder }: { value: string; onChange: (v: string) => void; placeholder?: string }) {
+  return (
+    <div className="flex items-center gap-4 bg-white dark:bg-slate-800 p-4 rounded-[24px] border border-primary/5 dark:border-slate-700 shadow-sm mb-8">
+      <Search className="w-5 h-5 text-secondary" />
+      <input 
+        type="text" 
+        placeholder={placeholder || "Buscar..."} 
+        className="flex-1 outline-none text-sm font-bold text-primary dark:text-white bg-transparent placeholder:text-primary/30 dark:placeholder:text-slate-500"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+      />
+      <Filter className="w-5 h-5 text-primary/40" />
+    </div>
+  );
+}
+
 const formatUSD = (val: number) => Math.round(val || 0).toLocaleString();
 
 enum OperationType {
@@ -647,7 +663,7 @@ export default function App() {
               {!isSidebarCollapsed && <span>Cerrar Sesión</span>}
             </button>
             <div className={cn("pt-4 text-center", isSidebarCollapsed ? "px-0" : "px-4")}>
-              <span className="text-[9px] font-black text-slate-300 dark:text-slate-700 uppercase tracking-[0.3em]">v1.0.3 PROD</span>
+              <span className="text-[9px] font-black text-slate-300 dark:text-slate-700 uppercase tracking-[0.3em]">v1.0.5 PROD</span>
             </div>
           </div>
         </div>
@@ -667,15 +683,8 @@ export default function App() {
           </h1>
 
           <div className="flex items-center gap-6">
-            <div className="relative hidden lg:block">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-              <input 
-                type="text" 
-                placeholder="Buscar clientes, empleados o transacciones..." 
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="pl-10 pr-4 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-700 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 w-64 dark:text-slate-200"
-              />
+            <div className="flex-1 flex items-center justify-center">
+              {/* Contextual search removed from header as per user request */}
             </div>
 
             <div className="flex items-center gap-4 border-l border-slate-100 pl-6">
@@ -755,10 +764,10 @@ export default function App() {
           {activeTab === 'dashboard' && <DashboardView clients={filteredClients} payments={filteredPayments} cashflow={filteredCashflow} onNavigate={setActiveTab} />}
           {activeTab === 'clients' && <ClientsView clients={filteredClients} isAdding={isAddingClient} setIsAdding={setIsAddingClient} payments={payments} cashflow={cashflow} staff={activeStaff} settings={settings} searchTerm={searchTerm} setSearchTerm={setSearchTerm} />}
           {activeTab === 'payments' && <PaymentsView clients={filteredClients} payments={filteredPayments} searchTerm={searchTerm} setSearchTerm={setSearchTerm} />}
-          {activeTab === 'cashflow' && <CashflowView cashflow={filteredCashflow} isAdding={isAddingCashflow} setIsAdding={setIsAddingCashflow} clients={activeClients} payments={activePayments} staff={activeStaff} />}
-          {activeTab === 'payroll' && <PayrollView staff={filteredStaff} payroll={payroll} commissions={commissions} isAddingStaff={isAddingStaff} setIsAddingStaff={setIsAddingStaff} setSettings={setSettings} user={user!} />}
-          {activeTab === 'trash' && <TrashView clients={deletedClients} payments={payments} />}
-          {activeTab === 'reports' && <ReportsView cashflow={filteredCashflow} clients={filteredClients} payments={filteredPayments} commissions={commissions} staff={filteredStaff} />}
+          {activeTab === 'cashflow' && <CashflowView cashflow={filteredCashflow} isAdding={isAddingCashflow} setIsAdding={setIsAddingCashflow} clients={activeClients} payments={activePayments} staff={activeStaff} searchTerm={searchTerm} setSearchTerm={setSearchTerm} />}
+          {activeTab === 'payroll' && <PayrollView staff={filteredStaff} payroll={payroll} commissions={commissions} isAddingStaff={isAddingStaff} setIsAddingStaff={setIsAddingStaff} setSettings={setSettings} user={user!} searchTerm={searchTerm} setSearchTerm={setSearchTerm} />}
+          {activeTab === 'trash' && <TrashView clients={deletedClients} payments={payments} searchTerm={searchTerm} setSearchTerm={setSearchTerm} />}
+          {activeTab === 'reports' && <ReportsView cashflow={filteredCashflow} clients={filteredClients} payments={filteredPayments} commissions={commissions} staff={filteredStaff} searchTerm={searchTerm} setSearchTerm={setSearchTerm} />}
           {activeTab === 'settings' && <SettingsView settings={settings} setSettings={setSettings} user={user!} />}
         </div>
       </main>
@@ -793,7 +802,17 @@ function NavItem({ active, onClick, icon, label, collapsed }: { active: boolean;
 
 // --- Dashboard View ---
 
-function DashboardView({ clients, payments, cashflow, onNavigate }: { clients: Client[]; payments: Payment[]; cashflow: CashflowEntry[]; onNavigate: (tab: any) => void }) {
+function DashboardView({ 
+  clients, 
+  payments, 
+  cashflow, 
+  onNavigate
+}: { 
+  clients: Client[]; 
+  payments: Payment[]; 
+  cashflow: CashflowEntry[]; 
+  onNavigate: (tab: any) => void;
+}) {
   const formatCurrency = useCurrency();
   const [segmentation, setSegmentation] = useState<'weekly' | 'monthly' | 'quarterly' | 'semiannually' | 'annually'>('monthly');
   const [chartType, setChartType] = useState<'area' | 'bar'>('bar');
@@ -1562,17 +1581,7 @@ function ClientsView({
         </Button>
       </div>
 
-      <div className="flex items-center gap-4 bg-white dark:bg-slate-800 p-4 rounded-[24px] border border-primary/5 dark:border-slate-700 shadow-sm">
-        <Search className="w-5 h-5 text-secondary" />
-        <input 
-          type="text" 
-          placeholder="Buscar por nombre, email, empresa o DNI/CUIL..." 
-          className="flex-1 outline-none text-sm font-bold text-primary dark:text-white bg-transparent placeholder:text-primary/30 dark:placeholder:text-slate-500"
-          value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
-        />
-        <Filter className="w-5 h-5 text-primary/40" />
-      </div>
+      <ContextualSearch value={searchTerm} onChange={setSearchTerm} placeholder="Buscar por nombre, email, empresa o DNI/CUIL..." />
 
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-8">
         {clients.map(client => {
@@ -2102,18 +2111,9 @@ function PaymentsView({
 
   return (
     <div className="space-y-8">
-      <div className="flex flex-col md:flex-row md:items-center justify-end gap-6">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
+        <ContextualSearch value={searchTerm} onChange={setSearchTerm} placeholder="Buscar cliente o monto..." />
         <div className="flex flex-col sm:flex-row gap-4">
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-            <input 
-              type="text" 
-              placeholder="Buscar cliente o monto..." 
-              className="pl-10 pr-4 py-2 bg-white dark:bg-slate-800 border border-slate-100 dark:border-slate-700 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-primary/10 w-full sm:w-64 dark:text-white"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-            />
-          </div>
           <select 
             value={filterStatus}
             onChange={(e) => setFilterStatus(e.target.value as any)}
@@ -2378,7 +2378,17 @@ function PaymentsView({
 
 // --- Trash View ---
 
-function TrashView({ clients, payments }: { clients: Client[]; payments: Payment[] }) {
+function TrashView({ 
+  clients, 
+  payments,
+  searchTerm,
+  setSearchTerm 
+}: { 
+  clients: Client[]; 
+  payments: Payment[];
+  searchTerm: string;
+  setSearchTerm: (v: string) => void;
+}) {
   const formatCurrency = useCurrency();
   const [confirmPermDeleteId, setConfirmPermDeleteId] = useState<string | null>(null);
 
@@ -2432,6 +2442,7 @@ function TrashView({ clients, payments }: { clients: Client[]; payments: Payment
 
   return (
     <div className="space-y-8">
+      <ContextualSearch value={searchTerm} onChange={setSearchTerm} placeholder="Buscar en la papelera..." />
       {clients.length === 0 ? (
         <Card className="p-12 bento-card flex flex-col items-center justify-center text-center space-y-4 bg-white/50 dark:bg-slate-800/50">
           <div className="w-16 h-16 bg-slate-50 dark:bg-slate-900/50 rounded-full flex items-center justify-center text-slate-300 dark:text-slate-600">
@@ -2519,7 +2530,23 @@ function TrashView({ clients, payments }: { clients: Client[]; payments: Payment
 
 // --- Reports View ---
 
-function ReportsView({ cashflow, clients, payments, commissions, staff }: { cashflow: CashflowEntry[]; clients: Client[]; payments: Payment[]; commissions: Commission[]; staff: StaffMember[] }) {
+function ReportsView({ 
+  cashflow, 
+  clients, 
+  payments, 
+  commissions, 
+  staff,
+  searchTerm,
+  setSearchTerm 
+}: { 
+  cashflow: CashflowEntry[]; 
+  clients: Client[]; 
+  payments: Payment[]; 
+  commissions: Commission[]; 
+  staff: StaffMember[];
+  searchTerm: string;
+  setSearchTerm: (v: string) => void;
+}) {
   const formatCurrency = useCurrency();
 
   const commissionsByStaff = useMemo(() => {
@@ -2577,6 +2604,7 @@ function ReportsView({ cashflow, clients, payments, commissions, staff }: { cash
 
   return (
     <div className="space-y-10 animate-in fade-in slide-in-from-bottom-4 duration-700">
+      <ContextualSearch value={searchTerm} onChange={setSearchTerm} placeholder="Buscar en reportes..." />
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
         <Card className="p-8">
           <h3 className="text-lg font-bold text-slate-800 dark:text-slate-100 mb-6">Ingresos por Categoría</h3>
@@ -2739,7 +2767,9 @@ function CashflowView({
   setIsAdding, 
   clients, 
   payments,
-  staff
+  staff,
+  searchTerm,
+  setSearchTerm
 }: { 
   cashflow: CashflowEntry[]; 
   isAdding: boolean; 
@@ -2747,6 +2777,8 @@ function CashflowView({
   clients: Client[];
   payments: Payment[];
   staff: StaffMember[];
+  searchTerm: string;
+  setSearchTerm: (v: string) => void;
 }) {
   const settings = React.useContext(SettingsContext);
   const formatCurrency = useCurrency();
@@ -2979,6 +3011,7 @@ function CashflowView({
 
   return (
     <div className="space-y-8">
+      <ContextualSearch value={searchTerm} onChange={setSearchTerm} placeholder="Buscar transacciones..." />
       <div className="flex flex-col lg:flex-row lg:items-center justify-end gap-6">
         <div className="flex flex-wrap items-center gap-4">
           <div className="flex bg-white dark:bg-slate-800 p-1 rounded-xl border border-slate-100 dark:border-slate-700 shadow-sm">
@@ -3264,7 +3297,9 @@ function PayrollView({
   isAddingStaff, 
   setIsAddingStaff,
   setSettings,
-  user
+  user,
+  searchTerm,
+  setSearchTerm
 }: { 
   staff: StaffMember[]; 
   payroll: PayrollPayment[];
@@ -3273,6 +3308,8 @@ function PayrollView({
   setIsAddingStaff: (v: boolean) => void;
   setSettings: React.Dispatch<React.SetStateAction<AppSettings>>;
   user: User;
+  searchTerm: string;
+  setSearchTerm: (v: string) => void;
 }) {
   const settings = React.useContext(SettingsContext);
   const formatCurrency = useCurrency();
@@ -3434,6 +3471,7 @@ function PayrollView({
   return (
     <>
       <div className="space-y-8">
+        <ContextualSearch value={searchTerm} onChange={setSearchTerm} placeholder="Buscar empleados o comisiones..." />
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
           <h2 className="text-xl md:text-2xl font-black text-primary dark:text-secondary uppercase italic tracking-tight">Gestión de <span className="text-secondary dark:text-tertiary">Payroll</span></h2>
           <div className="flex items-center gap-2 bg-neutral/50 dark:bg-slate-800/50 p-1 rounded-2xl border border-white/50 dark:border-slate-700 overflow-x-auto whitespace-nowrap max-w-full hide-scrollbar">
