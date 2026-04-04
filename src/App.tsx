@@ -823,8 +823,8 @@ export default function App() {
 
         <div className="p-8 bg-slate-50 dark:bg-slate-950">
           {activeTab === 'dashboard' && <DashboardView clients={filteredClients} payments={filteredPayments} cashflow={filteredCashflow} onNavigate={setActiveTab} />}
-          {activeTab === 'clients' && <ClientsView clients={filteredClients} isAdding={isAddingClient} setIsAdding={setIsAddingClient} payments={payments} cashflow={cashflow} staff={activeStaff} settings={settings} searchTerm={searchTerm} setSearchTerm={setSearchTerm} />}
-          {activeTab === 'payments' && <PaymentsView clients={filteredClients} payments={filteredPayments} searchTerm={searchTerm} setSearchTerm={setSearchTerm} generateCommissions={generateCommissions} />}
+          {activeTab === 'clients' && <ClientsView clients={filteredClients} isAdding={isAddingClient} setIsAdding={setIsAddingClient} payments={payments} cashflow={cashflow} staff={activeStaff} settings={settings} searchTerm={searchTerm} setSearchTerm={setSearchTerm} onNavigate={setActiveTab} />}
+          {activeTab === 'payments' && <PaymentsView clients={filteredClients} payments={filteredPayments} searchTerm={searchTerm} setSearchTerm={setSearchTerm} generateCommissions={generateCommissions} onNavigate={setActiveTab} />}
           {activeTab === 'invoices' && <InvoicesView payments={filteredPayments} clients={filteredClients} searchTerm={searchTerm} setSearchTerm={setSearchTerm} />}
           {activeTab === 'cashflow' && <CashflowView cashflow={filteredCashflow} isAdding={isAddingCashflow} setIsAdding={setIsAddingCashflow} clients={activeClients} payments={activePayments} staff={activeStaff} searchTerm={searchTerm} setSearchTerm={setSearchTerm} generateCommissions={generateCommissions} />}
           {activeTab === 'payroll' && <PayrollView staff={filteredStaff} payroll={payroll} commissions={commissions} isAddingStaff={isAddingStaff} setIsAddingStaff={setIsAddingStaff} setSettings={setSettings} user={user!} searchTerm={searchTerm} setSearchTerm={setSearchTerm} />}
@@ -1481,7 +1481,8 @@ function ClientsView({
   staff, 
   settings,
   searchTerm,
-  setSearchTerm
+  setSearchTerm,
+  onNavigate
 }: { 
   clients: Client[]; 
   isAdding: boolean; 
@@ -1492,6 +1493,7 @@ function ClientsView({
   settings: AppSettings;
   searchTerm: string;
   setSearchTerm: (v: string) => void;
+  onNavigate: (tab: string) => void;
 }) {
   const formatCurrency = useCurrency();
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
@@ -1548,17 +1550,24 @@ function ClientsView({
       
       // Generate pending payments
       const installmentAmount = totalUSD / installments;
+      const roundedInstallmentAmount = Math.round(installmentAmount);
+      
       for (let i = 1; i <= installments; i++) {
         const dueDate = new Date();
         dueDate.setMonth(dueDate.getMonth() + i - 1);
+        
+        // Adjust the last installment to match totalUSD exactly if rounding caused a difference
+        const currentAmount = i === installments 
+          ? totalUSD - (roundedInstallmentAmount * (installments - 1))
+          : roundedInstallmentAmount;
         
         await addDoc(collection(db, 'payments'), {
           clientId: docRef.id,
           clientName: `${clientData.firstName} ${clientData.lastName}`,
           installmentNumber: i,
-          amount: installmentAmount,
+          amount: currentAmount,
           currency: 'USD',
-          amountUSD: installmentAmount,
+          amountUSD: currentAmount,
           dueDate: dueDate.toISOString(),
           status: 'pending',
           createdAt: new Date().toISOString()
@@ -1566,7 +1575,15 @@ function ClientsView({
       }
 
       setIsAdding(false);
-      toast.success('Cliente agregado correctamente');
+      toast.success('Cliente agregado correctamente', {
+        action: {
+          label: 'Confirmar Pago',
+          onClick: () => {
+            setSearchTerm(`${clientData.firstName} ${clientData.lastName}`);
+            onNavigate('payments');
+          }
+        }
+      });
     } catch (err) {
       console.error("Error adding client:", err);
       handleFirestoreError(err, OperationType.CREATE, 'clients');
@@ -1745,6 +1762,20 @@ function ClientsView({
                   </div>
                 );
               })()}
+
+              {pendingCount > 0 && (
+                <Button 
+                  variant="secondary" 
+                  className="w-full py-3 text-xs font-black uppercase tracking-widest shadow-lg shadow-secondary/10"
+                  onClick={() => {
+                    setSearchTerm(`${client.firstName} ${client.lastName}`);
+                    onNavigate('payments');
+                  }}
+                >
+                  <CreditCard className="w-4 h-4" />
+                  Confirmar Pago
+                </Button>
+              )}
 
             <div className="space-y-3">
               <div className="flex flex-wrap gap-2">
@@ -2093,20 +2124,29 @@ function PaymentsView({
   payments,
   searchTerm,
   setSearchTerm,
-  generateCommissions
+  generateCommissions,
+  onNavigate
 }: { 
   clients: Client[]; 
   payments: Payment[];
   searchTerm: string;
   setSearchTerm: (v: string) => void;
   generateCommissions: (amountUSD: number, clientId: string, paymentId: string, date: string) => Promise<void>;
+  onNavigate: (tab: string) => void;
 }) {
   const settings = React.useContext(SettingsContext);
   const formatCurrency = useCurrency();
   const [isPaying, setIsPaying] = useState<Payment | null>(null);
+  const [paymentCurrency, setPaymentCurrency] = useState<Currency>('USD');
   const [arsRate, setArsRate] = useState(1200); // Default placeholder rate
   const [filterStatus, setFilterStatus] = useState<'all' | 'paid' | 'pending'>('all');
   const [isLoadingRate, setIsLoadingRate] = useState(false);
+
+  useEffect(() => {
+    if (isPaying) {
+      setPaymentCurrency('USD');
+    }
+  }, [isPaying]);
 
   useEffect(() => {
     const fetchRate = async () => {
@@ -2142,7 +2182,7 @@ function PaymentsView({
     const amount = Number(formData.get('amount'));
     const rate = Number(formData.get('exchangeRate') || 1);
     
-    const amountUSD = currency === 'USD' ? amount : amount / rate;
+    const amountUSD = currency === 'USD' ? Math.round(amount) : amount / rate;
     const paymentMethod = formData.get('paymentMethod') as PaymentMethod;
     const isAutomaticReceipt = ['Mercury', 'Stripe'].includes(paymentMethod);
 
@@ -2195,7 +2235,15 @@ function PaymentsView({
       await generateCommissions(amountUSD, isPaying.clientId, isPaying.id!, format(new Date(), 'yyyy-MM-dd'));
 
       setIsPaying(null);
-      toast.success('Pago procesado correctamente');
+      toast.success('Pago procesado correctamente', {
+        action: {
+          label: 'Emitir Factura',
+          onClick: () => {
+            setSearchTerm(isPaying.clientName);
+            onNavigate('invoices');
+          }
+        }
+      });
     } catch (err) {
       console.error("Error processing payment:", err);
       toast.error('Error al procesar el pago');
@@ -2298,9 +2346,24 @@ function PaymentsView({
                           Registrar Pago
                         </Button>
                       ) : (
-                        <div className="flex items-center justify-start gap-2 text-xs font-bold text-primary/40">
-                          <CheckCircle className="w-4 h-4 text-green-500" />
-                          {payment.paymentMethod}
+                        <div className="flex flex-col gap-2">
+                          <div className="flex items-center justify-start gap-2 text-xs font-bold text-primary/40">
+                            <CheckCircle className="w-4 h-4 text-green-500" />
+                            {payment.paymentMethod}
+                          </div>
+                          {payment.invoiceStatus === 'pending' && (
+                            <Button 
+                              variant="tertiary" 
+                              className="py-1.5 px-3 text-[10px] font-black uppercase tracking-widest shadow-sm"
+                              onClick={() => {
+                                setSearchTerm(payment.clientName);
+                                onNavigate('invoices');
+                              }}
+                            >
+                              <FileText className="w-3 h-3" />
+                              Emitir Factura
+                            </Button>
+                          )}
                         </div>
                       )}
                     </td>
@@ -2376,9 +2439,24 @@ function PaymentsView({
                       Registrar Pago
                     </Button>
                   ) : (
-                    <div className="flex items-center gap-2 text-xs font-bold text-primary/40 bg-slate-50 dark:bg-slate-900/50 p-2 rounded-lg">
-                      <CheckCircle className="w-4 h-4 text-green-500" />
-                      <span>Pagado vía {payment.paymentMethod}</span>
+                    <div className="space-y-3">
+                      <div className="flex items-center gap-2 text-xs font-bold text-primary/40 bg-slate-50 dark:bg-slate-900/50 p-2 rounded-lg">
+                        <CheckCircle className="w-4 h-4 text-green-500" />
+                        <span>Pagado vía {payment.paymentMethod}</span>
+                      </div>
+                      {payment.invoiceStatus === 'pending' && (
+                        <Button 
+                          variant="tertiary" 
+                          className="w-full py-3 text-xs font-black uppercase tracking-widest"
+                          onClick={() => {
+                            setSearchTerm(payment.clientName);
+                            onNavigate('invoices');
+                          }}
+                        >
+                          <FileText className="w-4 h-4" />
+                          Emitir Factura
+                        </Button>
+                      )}
                     </div>
                   )}
                 </div>
@@ -2411,14 +2489,19 @@ function PaymentsView({
                 label="Moneda" 
                 name="currency" 
                 defaultValue="USD"
+                onChange={(e) => setPaymentCurrency(e.target.value as Currency)}
                 options={[{ value: 'USD', label: 'Dólares (USD)' }, { value: 'ARS', label: 'Pesos (ARS)' }]} 
               />
               <Input 
+                key={`${isPaying.id}-${paymentCurrency}`}
                 label="Monto a Pagar" 
                 name="amount" 
                 type="number" 
-                step="0.01" 
-                defaultValue={isPaying.amountUSD - (isPaying.paidAmountUSD || 0)} 
+                step={paymentCurrency === 'USD' ? "1" : "0.01"} 
+                defaultValue={paymentCurrency === 'USD' 
+                  ? Math.round(isPaying.amountUSD - (isPaying.paidAmountUSD || 0))
+                  : Math.round((isPaying.amountUSD - (isPaying.paidAmountUSD || 0)) * arsRate)
+                } 
                 required 
               />
               
