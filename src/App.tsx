@@ -965,7 +965,9 @@ export default function App() {
               {!isSidebarCollapsed && <span>Cerrar Sesión</span>}
             </button>
             <div className={cn("pt-4 text-center", isSidebarCollapsed ? "px-0" : "px-4")}>
-              <span className="text-[9px] font-black text-slate-300 dark:text-slate-700 uppercase tracking-[0.3em]">v1.1.0 PROD</span>
+              <span className="text-[9px] font-black text-slate-300 dark:text-slate-700 uppercase tracking-[0.3em]">
+                v1.1.0 {import.meta.env.MODE === 'production' ? 'PROD' : 'DEV'}
+              </span>
             </div>
           </div>
         </div>
