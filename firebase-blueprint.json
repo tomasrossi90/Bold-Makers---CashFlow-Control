@@ -6,6 +6,7 @@
       "type": "object",
       "properties": {
         "id": { "type": "string", "description": "Unique identifier for the client." },
+        "companyId": { "type": "string", "description": "Reference to the company this client belongs to." },
         "firstName": { "type": "string", "description": "Client's first name." },
         "lastName": { "type": "string", "description": "Client's last name." },
         "dni": { "type": "string", "description": "National ID (DNI)." },
@@ -30,6 +31,7 @@
       "description": "A specific installment payment from a client.",
       "type": "object",
       "properties": {
+        "companyId": { "type": "string", "description": "Reference to the company." },
         "clientId": { "type": "string", "description": "Reference to the client." },
         "installmentNumber": { "type": "number", "description": "Which installment this is." },
         "amount": { "type": "number", "description": "Amount paid." },
@@ -53,6 +55,7 @@
       "description": "An income or expense entry for the business.",
       "type": "object",
       "properties": {
+        "companyId": { "type": "string", "description": "Reference to the company." },
         "type": { "type": "string", "enum": ["income", "expense"], "description": "Type of entry." },
         "amountUSD": { "type": "number", "description": "Amount in USD." },
         "category": { "type": "string", "description": "Category (e.g., Mentorship, Marketing, Software)." },
@@ -70,6 +73,7 @@
       "type": "object",
       "properties": {
         "id": { "type": "string", "description": "Unique identifier for the staff member." },
+        "companyId": { "type": "string", "description": "Reference to the company." },
         "name": { "type": "string", "description": "Staff member's full name." },
         "role": { "type": "string", "description": "Staff member's role." },
         "email": { "type": "string", "description": "Email address." },
@@ -83,6 +87,7 @@
       "description": "A payment made to a staff member.",
       "type": "object",
       "properties": {
+        "companyId": { "type": "string", "description": "Reference to the company." },
         "staffId": { "type": "string", "description": "Reference to the staff member." },
         "staffName": { "type": "string", "description": "Staff member's name." },
         "amountUSD": { "type": "number", "description": "Amount paid in USD." },
@@ -92,9 +97,42 @@
         "createdAt": { "type": "string", "format": "date-time", "description": "Creation timestamp." }
       },
       "required": ["staffId", "amountUSD", "date", "period", "paymentMethod"]
+    },
+    "company": {
+      "title": "Company",
+      "description": "A business or mentorship organization.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique identifier." },
+        "name": { "type": "string", "description": "Company name." },
+        "ownerId": { "type": "string", "description": "UID of the user who created it." },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Creation timestamp." }
+      },
+      "required": ["name", "ownerId"]
+    },
+    "userProfile": {
+      "title": "User Profile",
+      "description": "Extended user information and role.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "Firebase Auth UID." },
+        "email": { "type": "string", "description": "User email." },
+        "companyId": { "type": "string", "description": "Reference to the company." },
+        "role": { "type": "string", "enum": ["admin", "editor", "viewer"], "description": "User role within the company." },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Creation timestamp." }
+      },
+      "required": ["uid", "email", "companyId", "role"]
     }
   },
   "firestore": {
+    "/companies/{companyId}": {
+      "schema": "company",
+      "description": "Collection of companies."
+    },
+    "/users/{uid}": {
+      "schema": "userProfile",
+      "description": "Collection of user profiles."
+    },
     "/clients/{clientId}": {
       "schema": "client",
       "description": "Collection of clients."

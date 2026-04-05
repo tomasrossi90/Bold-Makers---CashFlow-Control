@@ -4,26 +4,32 @@ service cloud.firestore {
     // ===============================================================
     // Assumed Data Model
     // ===============================================================
+    // Collection: companies
+    // Fields: name, ownerId, createdAt
+    //
+    // Collection: users
+    // Fields: uid, email, companyId, role, createdAt
+    //
     // Collection: clients
-    // Fields: firstName, lastName, dni, cuil, email, businessName, address, city, province, country, installments, totalAmountUSD, comments, createdAt
+    // Fields: companyId, firstName, lastName, dni, cuil, email, businessName, address, city, province, country, installments, totalAmountUSD, comments, createdAt
     //
     // Collection: payments
-    // Fields: clientId, installmentNumber, amount, currency, amountUSD, exchangeRate, paymentDate, dueDate, paymentMethod, status, createdAt
+    // Fields: companyId, clientId, installmentNumber, amount, currency, amountUSD, exchangeRate, paymentDate, dueDate, paymentMethod, status, createdAt
     //
     // Collection: cashflow
-    // Fields: type, amountUSD, category, date, description, paymentId, createdAt
+    // Fields: companyId, type, amountUSD, category, date, description, paymentId, createdAt
     //
     // Collection: staff
-    // Fields: name, role, email, baseSalaryUSD, createdAt
+    // Fields: companyId, name, role, email, baseSalaryUSD, createdAt
     //
     // Collection: payroll
-    // Fields: staffId, staffName, amountUSD, date, period, paymentMethod, createdAt
+    // Fields: companyId, staffId, staffName, amountUSD, date, period, paymentMethod, createdAt
     //
     // Collection: commissions
-    // Fields: staffId, staffName, clientId, clientName, paymentId, amountUSD, percentage, staffRole, status, date, createdAt
+    // Fields: companyId, staffId, staffName, clientId, clientName, paymentId, amountUSD, percentage, staffRole, status, date, createdAt
     //
     // Collection: settings
-    // Fields: currency, decimals, theme, paymentMethods, updatedAt, payrollDay, defaultSetterCommissionPct, defaultCloserCommissionPct
+    // Fields: companyId, currency, decimals, theme, paymentMethods, updatedAt, payrollDay, defaultSetterCommissionPct, defaultCloserCommissionPct
     // ===============================================================
 
     // Helper Functions
@@ -31,11 +37,32 @@ service cloud.firestore {
       return request.auth != null;
     }
 
-    function isAuthorized() {
-      return isAuthenticated() && (
-        request.auth.token.email == "tomas.rossi190@gmail.com" ||
-        request.auth.token.email_verified == true
-      );
+    function getUserData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function getCompanyId() {
+      return getUserData().companyId;
+    }
+
+    function getRole() {
+      return getUserData().role;
+    }
+
+    function isCompanyMember(companyId) {
+      return isAuthenticated() && getCompanyId() == companyId;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() && getRole() == 'admin';
+    }
+
+    function isEditor() {
+      return isAuthenticated() && (getRole() == 'admin' || getRole() == 'editor');
+    }
+
+    function isAuthorized(companyId) {
+      return isCompanyMember(companyId);
     }
 
     function hasRequiredFields(fields) {
@@ -50,21 +77,22 @@ service cloud.firestore {
       return !request.resource.data.diff(resource.data).affectedKeys().hasAny(fields);
     }
 
-    function isValidString(field, min, max) {
-      return request.resource.data[field] is string && 
-             request.resource.data[field].size() >= min && 
-             request.resource.data[field].size() <= max;
-    }
-
-    function isValidNumber(field, min, max) {
-      return request.resource.data[field] is number && 
-             request.resource.data[field] >= min && 
-             request.resource.data[field] <= max;
-    }
-
     // Domain Validators
+    function isValidCompany(data) {
+      return hasRequiredFields(['name', 'ownerId', 'createdAt']) &&
+             data.name is string && data.name.size() > 0 &&
+             data.ownerId == request.auth.uid;
+    }
+
+    function isValidUserProfile(data) {
+      return hasRequiredFields(['uid', 'email', 'companyId', 'role', 'createdAt']) &&
+             data.uid == request.auth.uid &&
+             data.role in ['admin', 'editor', 'viewer'];
+    }
+
     function isValidClient(data) {
-      return hasRequiredFields(['firstName', 'lastName', 'totalAmountUSD', 'installments', 'createdAt']) &&
+      return hasRequiredFields(['companyId', 'firstName', 'lastName', 'totalAmountUSD', 'installments', 'createdAt']) &&
+             data.companyId == getCompanyId() &&
              data.firstName is string && data.firstName.size() > 0 &&
              data.lastName is string && data.lastName.size() > 0 &&
              data.totalAmountUSD is number && data.totalAmountUSD >= 0 &&
@@ -72,7 +100,8 @@ service cloud.firestore {
     }
 
     function isValidPayment(data) {
-      return hasRequiredFields(['clientId', 'installmentNumber', 'amountUSD', 'status', 'dueDate', 'createdAt']) &&
+      return hasRequiredFields(['companyId', 'clientId', 'installmentNumber', 'amountUSD', 'status', 'dueDate', 'createdAt']) &&
+             data.companyId == getCompanyId() &&
              data.clientId is string &&
              data.installmentNumber is number &&
              data.amountUSD is number && data.amountUSD >= 0 &&
@@ -80,7 +109,8 @@ service cloud.firestore {
     }
 
     function isValidCashflow(data) {
-      return hasRequiredFields(['type', 'amountUSD', 'category', 'date', 'description', 'createdAt']) &&
+      return hasRequiredFields(['companyId', 'type', 'amountUSD', 'category', 'date', 'description', 'createdAt']) &&
+             data.companyId == getCompanyId() &&
              data.type in ['income', 'expense'] &&
              data.amountUSD is number && data.amountUSD >= 0 &&
              data.category is string &&
@@ -89,7 +119,8 @@ service cloud.firestore {
     }
 
     function isValidStaff(data) {
-      return hasRequiredFields(['name', 'role', 'type', 'baseSalaryUSD', 'createdAt']) &&
+      return hasRequiredFields(['companyId', 'name', 'role', 'type', 'baseSalaryUSD', 'createdAt']) &&
+             data.companyId == getCompanyId() &&
              data.name is string && data.name.size() > 0 &&
              data.role is string &&
              data.type in ['setter', 'closer', 'other'] &&
@@ -97,70 +128,87 @@ service cloud.firestore {
     }
 
     function isValidPayroll(data) {
-      return hasRequiredFields(['staffId', 'staffName', 'amountUSD', 'date', 'period', 'createdAt']) &&
+      return hasRequiredFields(['companyId', 'staffId', 'staffName', 'amountUSD', 'date', 'period', 'createdAt']) &&
+             data.companyId == getCompanyId() &&
              data.staffId is string &&
              data.amountUSD is number && data.amountUSD >= 0;
     }
 
     function isValidCommission(data) {
-      return hasRequiredFields(['staffId', 'clientId', 'amountUSD', 'status', 'createdAt']) &&
+      return hasRequiredFields(['companyId', 'staffId', 'clientId', 'amountUSD', 'status', 'createdAt']) &&
+             data.companyId == getCompanyId() &&
              data.status in ['paid', 'pending'] &&
              data.amountUSD is number && data.amountUSD >= 0;
     }
 
     function isValidSettings(data) {
-      return hasRequiredFields(['currency', 'decimals', 'paymentMethods']) &&
+      return hasRequiredFields(['companyId', 'currency', 'decimals', 'paymentMethods']) &&
+             data.companyId == getCompanyId() &&
              data.currency in ['USD', 'ARS', 'EUR'] &&
              data.decimals is number && data.decimals >= 0 && data.decimals <= 2 &&
              data.paymentMethods is list;
     }
 
+    match /companies/{companyId} {
+      allow read: if isAuthenticated() && (resource.data.ownerId == request.auth.uid || isCompanyMember(companyId));
+      allow create: if isAuthenticated() && isValidCompany(request.resource.data);
+      allow update: if isAuthenticated() && resource.data.ownerId == request.auth.uid && isValidCompany(request.resource.data);
+      allow delete: if false;
+    }
+
+    match /users/{uid} {
+      allow read: if isAuthenticated() && (request.auth.uid == uid || getCompanyId() == resource.data.companyId);
+      allow create: if isAuthenticated() && request.auth.uid == uid && isValidUserProfile(request.resource.data);
+      allow update: if isAuthenticated() && (request.auth.uid == uid || isAdmin()) && isValidUserProfile(request.resource.data);
+      allow delete: if isAuthenticated() && isAdmin() && request.auth.uid != uid;
+    }
+
     match /clients/{clientId} {
-      allow read: if isAuthorized();
-      allow create: if isAuthorized() && isValidClient(request.resource.data);
-      allow update: if isAuthorized() && isValidClient(request.resource.data) && areImmutableFieldsUnchanged(['createdAt']);
-      allow delete: if isAuthorized();
+      allow read: if isAuthorized(resource.data.companyId);
+      allow create: if isAuthorized(request.resource.data.companyId) && isEditor() && isValidClient(request.resource.data);
+      allow update: if isAuthorized(resource.data.companyId) && isEditor() && isValidClient(request.resource.data) && areImmutableFieldsUnchanged(['createdAt', 'companyId']);
+      allow delete: if isAuthorized(resource.data.companyId) && isAdmin();
     }
 
     match /payments/{paymentId} {
-      allow read: if isAuthorized();
-      allow create: if isAuthorized() && isValidPayment(request.resource.data);
-      allow update: if isAuthorized() && isValidPayment(request.resource.data) && areImmutableFieldsUnchanged(['createdAt', 'clientId', 'installmentNumber']);
-      allow delete: if isAuthorized();
+      allow read: if isAuthorized(resource.data.companyId);
+      allow create: if isAuthorized(request.resource.data.companyId) && isEditor() && isValidPayment(request.resource.data);
+      allow update: if isAuthorized(resource.data.companyId) && isEditor() && isValidPayment(request.resource.data) && areImmutableFieldsUnchanged(['createdAt', 'companyId', 'clientId', 'installmentNumber']);
+      allow delete: if isAuthorized(resource.data.companyId) && isAdmin();
     }
 
     match /cashflow/{entryId} {
-      allow read: if isAuthorized();
-      allow create: if isAuthorized() && isValidCashflow(request.resource.data);
-      allow update: if isAuthorized() && isValidCashflow(request.resource.data) && areImmutableFieldsUnchanged(['createdAt', 'type', 'amountUSD', 'date']);
-      allow delete: if isAuthorized();
+      allow read: if isAuthorized(resource.data.companyId);
+      allow create: if isAuthorized(request.resource.data.companyId) && isEditor() && isValidCashflow(request.resource.data);
+      allow update: if isAuthorized(resource.data.companyId) && isEditor() && isValidCashflow(request.resource.data) && areImmutableFieldsUnchanged(['createdAt', 'companyId', 'type', 'amountUSD', 'date']);
+      allow delete: if isAuthorized(resource.data.companyId) && isAdmin();
     }
 
     match /staff/{staffId} {
-      allow read: if isAuthorized();
-      allow create: if isAuthorized() && isValidStaff(request.resource.data);
-      allow update: if isAuthorized() && isValidStaff(request.resource.data) && areImmutableFieldsUnchanged(['createdAt']);
-      allow delete: if isAuthorized();
+      allow read: if isAuthorized(resource.data.companyId);
+      allow create: if isAuthorized(request.resource.data.companyId) && isEditor() && isValidStaff(request.resource.data);
+      allow update: if isAuthorized(resource.data.companyId) && isEditor() && isValidStaff(request.resource.data) && areImmutableFieldsUnchanged(['createdAt', 'companyId']);
+      allow delete: if isAuthorized(resource.data.companyId) && isAdmin();
     }
 
     match /payroll/{payrollId} {
-      allow read: if isAuthorized();
-      allow create: if isAuthorized() && isValidPayroll(request.resource.data);
-      allow update: if isAuthorized() && isValidPayroll(request.resource.data) && areImmutableFieldsUnchanged(['createdAt', 'staffId', 'amountUSD']);
-      allow delete: if isAuthorized();
+      allow read: if isAuthorized(resource.data.companyId);
+      allow create: if isAuthorized(request.resource.data.companyId) && isEditor() && isValidPayroll(request.resource.data);
+      allow update: if isAuthorized(resource.data.companyId) && isEditor() && isValidPayroll(request.resource.data) && areImmutableFieldsUnchanged(['createdAt', 'companyId', 'staffId', 'amountUSD']);
+      allow delete: if isAuthorized(resource.data.companyId) && isAdmin();
     }
 
     match /commissions/{commissionId} {
-      allow read: if isAuthorized();
-      allow create: if isAuthorized() && isValidCommission(request.resource.data);
-      allow update: if isAuthorized() && isValidCommission(request.resource.data) && areImmutableFieldsUnchanged(['createdAt', 'staffId', 'clientId', 'amountUSD']);
-      allow delete: if isAuthorized();
+      allow read: if isAuthorized(resource.data.companyId);
+      allow create: if isAuthorized(request.resource.data.companyId) && isEditor() && isValidCommission(request.resource.data);
+      allow update: if isAuthorized(resource.data.companyId) && isEditor() && isValidCommission(request.resource.data) && areImmutableFieldsUnchanged(['createdAt', 'companyId', 'staffId', 'clientId', 'amountUSD']);
+      allow delete: if isAuthorized(resource.data.companyId) && isAdmin();
     }
 
     match /settings/{userId} {
-      allow read: if isAuthorized();
-      allow create, update: if isAuthorized() && isValidSettings(request.resource.data);
-      allow delete: if isAuthorized();
+      allow read: if isAuthenticated() && (request.auth.uid == userId || isCompanyMember(resource.data.companyId));
+      allow create, update: if isAuthenticated() && isAuthorized(request.resource.data.companyId) && isEditor() && isValidSettings(request.resource.data);
+      allow delete: if isAuthenticated() && isAuthorized(resource.data.companyId) && isAdmin();
     }
   }
 }
