@@ -455,6 +455,7 @@ export default function App() {
   const [userProfile, setUserProfile] = useState<{ uid: string; email: string; companyId: string; role: 'admin' | 'editor' | 'viewer' } | null>(null);
   const [company, setCompany] = useState<{ id: string; name: string; ownerId: string } | null>(null);
   const [loading, setLoading] = useState(true);
+  const [profileLoading, setProfileLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<'dashboard' | 'clients' | 'payments' | 'cashflow' | 'payroll' | 'trash' | 'reports' | 'settings' | 'team'>('dashboard');
   
   useEffect(() => {
@@ -642,10 +643,12 @@ export default function App() {
     if (!user) {
       setUserProfile(null);
       setCompany(null);
+      setProfileLoading(false);
       return;
     }
 
     const fetchProfile = async () => {
+      setProfileLoading(true);
       try {
         const profileDoc = await getDoc(doc(db, 'users', user.uid));
         if (profileDoc.exists()) {
@@ -662,6 +665,8 @@ export default function App() {
         }
       } catch (err) {
         console.error("Error fetching profile:", err);
+      } finally {
+        setProfileLoading(false);
       }
     };
 
@@ -804,7 +809,7 @@ export default function App() {
     }
   };
 
-  if (loading) {
+  if (loading || profileLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-white dark:bg-neutral-dark">
         <div className="flex flex-col items-center gap-6">
