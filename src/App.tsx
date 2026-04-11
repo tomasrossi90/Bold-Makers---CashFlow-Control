@@ -203,6 +203,45 @@ const useCurrency = () => {
 
 // --- Components ---
 
+interface SortHeaderProps {
+  label: string;
+  sortKey: string;
+  currentSort: { key: string; direction: 'asc' | 'desc' };
+  onSort: (key: string) => void;
+  className?: string;
+}
+
+const SortHeader = ({ label, sortKey, currentSort, onSort, className }: SortHeaderProps) => {
+  const isActive = currentSort.key === sortKey;
+  
+  return (
+    <th 
+      className={cn(
+        "px-8 py-5 text-[10px] font-black text-primary/40 dark:text-slate-500 uppercase tracking-widest cursor-pointer hover:text-primary dark:hover:text-slate-300 transition-colors group",
+        className
+      )}
+      onClick={() => onSort(sortKey)}
+    >
+      <div className="flex items-center gap-2">
+        {label}
+        <div className="flex flex-col -space-y-1 opacity-0 group-hover:opacity-100 transition-opacity">
+          <ChevronUp className={cn("w-2.5 h-2.5", isActive && currentSort.direction === 'asc' ? "text-secondary opacity-100" : "opacity-30")} />
+          <ChevronDown className={cn("w-2.5 h-2.5", isActive && currentSort.direction === 'desc' ? "text-secondary opacity-100" : "opacity-30")} />
+        </div>
+        {isActive && (
+          <div className="flex flex-col -space-y-1">
+            {currentSort.direction === 'asc' ? (
+              <ChevronUp className="w-2.5 h-2.5 text-secondary" />
+            ) : (
+              <ChevronDown className="w-2.5 h-2.5 text-secondary" />
+            )}
+          </div>
+        )}
+      </div>
+    </th>
+  );
+};
+
 const Button = ({ 
   children, 
   variant = 'primary', 
@@ -2019,27 +2058,50 @@ function ClientsView({
   const [viewingDetails, setViewingDetails] = useState<Client | null>(null);
   const [statusFilter, setStatusFilter] = useState<'pending' | 'completed'>('pending');
   const [isImporting, setIsImporting] = useState(false);
+  const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc' }>({ key: 'firstName', direction: 'asc' });
+
+  const handleSort = (key: string) => {
+    setSortConfig(prev => ({
+      key,
+      direction: prev.key === key && prev.direction === 'asc' ? 'desc' : 'asc'
+    }));
+  };
+
   const fileInputRef = React.useRef<HTMLInputElement>(null);
 
   const filteredByStatus = useMemo(() => {
-    return clients.filter(client => {
+    const filtered = clients.filter(client => {
       const clientPayments = payments.filter(p => p.clientId === client.id && !p.deletedAt);
-      const paidCount = clientPayments.filter(p => p.status === 'paid').length;
-      const totalCount = client.installments;
-      const isFullyPaid = paidCount >= totalCount && totalCount > 0;
+      const hasPending = clientPayments.some(p => p.status === 'pending');
+      const isFullyPaid = !hasPending && clientPayments.length > 0;
       
       return statusFilter === 'completed' ? isFullyPaid : !isFullyPaid;
     });
-  }, [clients, payments, statusFilter]);
+
+    return [...filtered].sort((a, b) => {
+      const aValue = a[sortConfig.key as keyof Client] || '';
+      const bValue = b[sortConfig.key as keyof Client] || '';
+
+      if (aValue === bValue) return 0;
+      const comparison = aValue < bValue ? -1 : 1;
+      return sortConfig.direction === 'asc' ? comparison : -comparison;
+    });
+  }, [clients, payments, statusFilter, sortConfig]);
 
   const handleAddClient = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const formData = new FormData(e.currentTarget);
     const totalUSD = Number(formData.get('totalAmountUSD'));
+    const upfrontUSD = Number(formData.get('upfrontPayment') || 0);
     const installments = Number(formData.get('installments')) || 1;
 
     if (isNaN(totalUSD) || totalUSD <= 0) {
       toast.error("El monto total debe ser mayor a 0");
+      return;
+    }
+
+    if (upfrontUSD > totalUSD) {
+      toast.error("El anticipo no puede ser mayor al monto total");
       return;
     }
 
@@ -2083,31 +2145,91 @@ function ClientsView({
         companyId: userProfile.companyId
       });
       
-      // Generate pending payments
+      // Generate payments
       const installmentAmount = totalUSD / installments;
-      const roundedInstallmentAmount = Math.round(installmentAmount);
-      
-      for (let i = 1; i <= installments; i++) {
-        const dueDate = new Date();
-        dueDate.setMonth(dueDate.getMonth() + i - 1);
-        
-        // Adjust the last installment to match totalUSD exactly if rounding caused a difference
-        const currentAmount = i === installments 
-          ? totalUSD - (roundedInstallmentAmount * (installments - 1))
-          : roundedInstallmentAmount;
-        
+      const roundedAmount = Math.round(installmentAmount);
+
+      if (upfrontUSD > 0) {
+        // First payment is the upfront (Part of Installment 1)
         await addDoc(collection(db, 'payments'), {
           companyId: userProfile.companyId,
           clientId: docRef.id,
           clientName: `${clientData.firstName} ${clientData.lastName}`,
-          installmentNumber: i,
-          amount: currentAmount,
+          installmentNumber: 1,
+          amount: upfrontUSD,
           currency: 'USD',
-          amountUSD: currentAmount,
-          dueDate: dueDate.toISOString(),
-          status: 'pending',
+          amountUSD: upfrontUSD,
+          dueDate: new Date(clientData.createdAt).toISOString(),
+          status: 'paid',
+          isUpfront: true,
+          paidAt: new Date().toISOString(),
           createdAt: new Date().toISOString()
         });
+
+        // Remaining part of Installment 1 (if any)
+        const firstInstallmentBalance = roundedAmount - upfrontUSD;
+        if (firstInstallmentBalance > 0) {
+          await addDoc(collection(db, 'payments'), {
+            companyId: userProfile.companyId,
+            clientId: docRef.id,
+            clientName: `${clientData.firstName} ${clientData.lastName}`,
+            installmentNumber: 1,
+            amount: firstInstallmentBalance,
+            currency: 'USD',
+            amountUSD: firstInstallmentBalance,
+            dueDate: new Date(clientData.createdAt).toISOString(),
+            status: 'pending',
+            createdAt: new Date().toISOString()
+          });
+        }
+
+        // Remaining installments (2 to N)
+        if (installments > 1) {
+          for (let i = 2; i <= installments; i++) {
+            const dueDate = new Date(clientData.createdAt);
+            dueDate.setMonth(dueDate.getMonth() + i - 1);
+            
+            const currentAmount = i === installments 
+              ? totalUSD - (roundedAmount * (installments - 1))
+              : roundedAmount;
+            
+            await addDoc(collection(db, 'payments'), {
+              companyId: userProfile.companyId,
+              clientId: docRef.id,
+              clientName: `${clientData.firstName} ${clientData.lastName}`,
+              installmentNumber: i,
+              amount: currentAmount,
+              currency: 'USD',
+              amountUSD: currentAmount,
+              dueDate: dueDate.toISOString(),
+              status: 'pending',
+              createdAt: new Date().toISOString()
+            });
+          }
+        }
+      } else {
+        // Standard generation (no upfront)
+        for (let i = 1; i <= installments; i++) {
+          const dueDate = new Date(clientData.createdAt);
+          dueDate.setMonth(dueDate.getMonth() + i - 1);
+          
+          const currentAmount = i === installments 
+            ? totalUSD - (roundedAmount * (installments - 1))
+            : roundedAmount;
+          
+          await addDoc(collection(db, 'payments'), {
+            companyId: userProfile.companyId,
+            clientId: docRef.id,
+            clientName: `${clientData.firstName} ${clientData.lastName}`,
+            installmentNumber: i,
+            amount: currentAmount,
+            currency: 'USD',
+            amountUSD: currentAmount,
+            dueDate: dueDate.toISOString(),
+            status: 'pending',
+            createdAt: new Date().toISOString()
+          });
+        }
       }
 
       setIsAdding(false);
@@ -2221,6 +2343,7 @@ function ClientsView({
             const firstName = row.firstName || row.Nombre || '';
             const lastName = row.lastName || row.Apellido || '';
             const totalUSD = Number(row.totalAmountUSD || row.MontoTotal || 0);
+            const upfrontUSD = Number(row.upfrontPayment || row.Anticipo || 0);
             const installments = Number(row.installments || row.Cuotas || 1);
             const paidInstallments = Number(row.paidInstallments || row.CuotasPagadas || 0);
             
@@ -2250,31 +2373,96 @@ function ClientsView({
             
             // Generate payments
             const installmentAmount = totalUSD / installments;
-            const roundedInstallmentAmount = Math.round(installmentAmount);
-            
-            for (let i = 1; i <= installments; i++) {
-              const dueDate = new Date(clientData.createdAt);
-              dueDate.setMonth(dueDate.getMonth() + i - 1);
-              
-              const currentAmount = i === installments 
-                ? totalUSD - (roundedInstallmentAmount * (installments - 1))
-                : roundedInstallmentAmount;
-              
-              const isPaid = i <= paidInstallments;
+            const roundedAmount = Math.round(installmentAmount);
 
+            if (upfrontUSD > 0) {
+              // First payment is the upfront (Part of Installment 1)
               await addDoc(collection(db, 'payments'), {
                 companyId: userProfile.companyId,
                 clientId: docRef.id,
                 clientName: `${clientData.firstName} ${clientData.lastName}`,
-                installmentNumber: i,
-                amount: currentAmount,
+                installmentNumber: 1,
+                amount: upfrontUSD,
                 currency: 'USD',
-                amountUSD: currentAmount,
-                dueDate: dueDate.toISOString(),
-                status: isPaid ? 'paid' : 'pending',
-                paidAt: isPaid ? dueDate.toISOString() : null,
+                amountUSD: upfrontUSD,
+                dueDate: new Date(clientData.createdAt).toISOString(),
+                status: 'paid',
+                isUpfront: true,
+                paidAt: new Date().toISOString(),
                 createdAt: new Date().toISOString()
               });
+
+              // Remaining part of Installment 1 (if any)
+              const firstInstallmentBalance = roundedAmount - upfrontUSD;
+              if (firstInstallmentBalance > 0) {
+                await addDoc(collection(db, 'payments'), {
+                  companyId: userProfile.companyId,
+                  clientId: docRef.id,
+                  clientName: `${clientData.firstName} ${clientData.lastName}`,
+                  installmentNumber: 1,
+                  amount: firstInstallmentBalance,
+                  currency: 'USD',
+                  amountUSD: firstInstallmentBalance,
+                  dueDate: new Date(clientData.createdAt).toISOString(),
+                  status: 'pending',
+                  createdAt: new Date().toISOString()
+                });
+              }
+
+              // Remaining installments (2 to N)
+              if (installments > 1) {
+                for (let i = 2; i <= installments; i++) {
+                  const dueDate = new Date(clientData.createdAt);
+                  dueDate.setMonth(dueDate.getMonth() + i - 1);
+                  
+                  const currentAmount = i === installments 
+                    ? totalUSD - (roundedAmount * (installments - 1))
+                    : roundedAmount;
+                  
+                  // If migrating, some of these might also be paid
+                  const isPaid = i <= paidInstallments;
+
+                  await addDoc(collection(db, 'payments'), {
+                    companyId: userProfile.companyId,
+                    clientId: docRef.id,
+                    clientName: `${clientData.firstName} ${clientData.lastName}`,
+                    installmentNumber: i,
+                    amount: currentAmount,
+                    currency: 'USD',
+                    amountUSD: currentAmount,
+                    dueDate: dueDate.toISOString(),
+                    status: isPaid ? 'paid' : 'pending',
+                    paidAt: isPaid ? dueDate.toISOString() : null,
+                    createdAt: new Date().toISOString()
+                  });
+                }
+              }
+            } else {
+              // Standard generation (no upfront)
+              for (let i = 1; i <= installments; i++) {
+                const dueDate = new Date(clientData.createdAt);
+                dueDate.setMonth(dueDate.getMonth() + i - 1);
+                
+                const currentAmount = i === installments 
+                  ? totalUSD - (roundedAmount * (installments - 1))
+                  : roundedAmount;
+                
+                const isPaid = i <= paidInstallments;
+
+                await addDoc(collection(db, 'payments'), {
+                  companyId: userProfile.companyId,
+                  clientId: docRef.id,
+                  clientName: `${clientData.firstName} ${clientData.lastName}`,
+                  installmentNumber: i,
+                  amount: currentAmount,
+                  currency: 'USD',
+                  amountUSD: currentAmount,
+                  dueDate: dueDate.toISOString(),
+                  status: isPaid ? 'paid' : 'pending',
+                  paidAt: isPaid ? dueDate.toISOString() : null,
+                  createdAt: new Date().toISOString()
+                });
+              }
             }
             successCount++;
           } catch (err) {
@@ -2304,11 +2492,11 @@ function ClientsView({
   const downloadTemplate = () => {
     const headers = [
       'firstName', 'lastName', 'email', 'phone', 'dni', 'businessName', 
-      'totalAmountUSD', 'installments', 'paidInstallments', 'startDate',
+      'totalAmountUSD', 'upfrontPayment', 'installments', 'paidInstallments', 'startDate',
       'address', 'city', 'province', 'country'
     ];
     const csvContent = headers.join(',') + '\n' + 
-      'Juan,Perez,juan@example.com,1122334455,20123456,Empresa SA,1200,12,3,2024-01-01,Calle Falsa 123,CABA,Buenos Aires,Argentina';
+      'Juan,Perez,juan@example.com,1122334455,20123456,Empresa SA,1200,400,12,0,2024-01-01,Calle Falsa 123,CABA,Buenos Aires,Argentina';
     
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement('a');
@@ -2362,44 +2550,68 @@ function ClientsView({
 
       <ContextualSearch value={searchTerm} onChange={setSearchTerm} placeholder="Buscar por nombre, email, empresa o DNI/CUIL..." />
 
-      <div className="flex items-center gap-2 bg-white dark:bg-slate-800 p-1.5 rounded-2xl border border-primary/5 dark:border-slate-700 w-fit mb-4">
-        <button
-          onClick={() => setStatusFilter('pending')}
-          className={cn(
-            "px-6 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest transition-all",
-            statusFilter === 'pending'
-              ? "bg-primary text-white shadow-lg shadow-primary/20"
-              : "text-primary/40 hover:text-primary dark:text-slate-500 dark:hover:text-slate-300"
-          )}
-        >
-          Pendientes ({clients.filter(c => {
-            const cp = payments.filter(p => p.clientId === c.id && !p.deletedAt);
-            return cp.filter(p => p.status === 'paid').length < c.installments;
-          }).length})
-        </button>
-        <button
-          onClick={() => setStatusFilter('completed')}
-          className={cn(
-            "px-6 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest transition-all",
-            statusFilter === 'completed'
-              ? "bg-green-600 text-white shadow-lg shadow-green-600/20"
-              : "text-primary/40 hover:text-primary dark:text-slate-500 dark:hover:text-slate-300"
-          )}
-        >
-          Completados ({clients.filter(c => {
-            const cp = payments.filter(p => p.clientId === c.id && !p.deletedAt);
-            return cp.filter(p => p.status === 'paid').length >= c.installments && c.installments > 0;
-          }).length})
-        </button>
+      <div className="flex flex-col sm:flex-row sm:items-center gap-4 mb-4">
+        <div className="flex items-center gap-2 bg-white dark:bg-slate-800 p-1.5 rounded-2xl border border-primary/5 dark:border-slate-700 w-fit">
+          <button
+            onClick={() => setStatusFilter('pending')}
+            className={cn(
+              "px-6 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest transition-all",
+              statusFilter === 'pending'
+                ? "bg-primary text-white shadow-lg shadow-primary/20"
+                : "text-primary/40 hover:text-primary dark:text-slate-500 dark:hover:text-slate-300"
+            )}
+          >
+            Pendientes ({clients.filter(c => {
+              const cp = payments.filter(p => p.clientId === c.id && !p.deletedAt);
+              return cp.some(p => p.status === 'pending');
+            }).length})
+          </button>
+          <button
+            onClick={() => setStatusFilter('completed')}
+            className={cn(
+              "px-6 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest transition-all",
+              statusFilter === 'completed'
+                ? "bg-green-600 text-white shadow-lg shadow-green-600/20"
+                : "text-primary/40 hover:text-primary dark:text-slate-500 dark:hover:text-slate-300"
+            )}
+          >
+            Completados ({clients.filter(c => {
+              const cp = payments.filter(p => p.clientId === c.id && !p.deletedAt);
+              return !cp.some(p => p.status === 'pending') && cp.length > 0;
+            }).length})
+          </button>
+        </div>
+
+        <div className="flex items-center gap-2 bg-white dark:bg-slate-800 p-1.5 rounded-2xl border border-primary/5 dark:border-slate-700 w-fit">
+          <span className="text-[10px] font-black text-primary/40 uppercase tracking-widest px-3">Ordenar por:</span>
+          <select 
+            value={sortConfig.key}
+            onChange={(e) => handleSort(e.target.value)}
+            className="bg-transparent text-xs font-bold text-primary dark:text-white outline-none cursor-pointer pr-4"
+          >
+            <option value="firstName">Nombre</option>
+            <option value="lastName">Apellido</option>
+            <option value="createdAt">Fecha Registro</option>
+            <option value="totalAmountUSD">Monto Total</option>
+          </select>
+          <button 
+            onClick={() => handleSort(sortConfig.key)}
+            className="p-2 text-primary/40 hover:text-primary transition-colors"
+          >
+            {sortConfig.direction === 'asc' ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+          </button>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-8">
         {filteredByStatus.map(client => {
           const clientPayments = payments.filter(p => p.clientId === client.id && !p.deletedAt);
+          const hasPending = clientPayments.some(p => p.status === 'pending');
+          const isFullyPaid = !hasPending && clientPayments.length > 0;
           const paidCount = clientPayments.filter(p => p.status === 'paid').length;
           const totalCount = client.installments;
-          const pendingCount = totalCount - paidCount;
-          const isFullyPaid = paidCount >= totalCount && totalCount > 0;
+          const pendingCount = clientPayments.filter(p => p.status === 'pending').length;
+          const hasUpfrontPaid = clientPayments.some(p => p.isUpfront && p.status === 'paid');
 
           return (
             <Card key={client.id} className="p-8 space-y-6 group relative overflow-hidden">
@@ -2414,8 +2626,15 @@ function ClientsView({
                 <div className="w-14 h-14 bg-secondary/10 rounded-[18px] flex items-center justify-center text-secondary font-black text-xl italic transition-transform duration-300 group-hover:scale-110 shrink-0">
                   {client.firstName[0]}{client.lastName[0]}
                 </div>
-                <div className="min-w-0">
-                  <h4 className="font-black text-primary text-lg tracking-tight truncate">{client.firstName} {client.lastName}</h4>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <h4 className="font-black text-primary text-lg tracking-tight truncate">{client.firstName} {client.lastName}</h4>
+                    {hasUpfrontPaid && (
+                      <span className="text-[7px] font-black text-secondary bg-secondary/10 border border-secondary/20 px-1.5 py-0.5 rounded-full uppercase tracking-widest shrink-0">
+                        Anticipo
+                      </span>
+                    )}
+                  </div>
                   <p className="text-xs font-bold text-primary/40 truncate">{client.email || 'Sin email'}</p>
                 </div>
               </div>
@@ -2595,15 +2814,18 @@ function ClientsView({
                 <Input label="País" name="country" />
                 <Input label="Fecha de Ingreso" name="createdAt" type="date" defaultValue={format(new Date(), 'yyyy-MM-dd')} required />
                 <Input label="Monto Total (USD)" name="totalAmountUSD" type="number" step="0.01" required />
+                <Input label="Anticipo (USD)" name="upfrontPayment" type="number" step="0.01" defaultValue="0" />
                 <Select 
-                  label="Cuotas" 
+                  label="Cantidad de Cuotas" 
                   name="installments" 
                   defaultValue="1"
                   options={[
-                    { value: '1', label: '1 Pago' },
+                    { value: '1', label: '1 Pago (Total)' },
                     { value: '2', label: '2 Pagos' },
                     { value: '3', label: '3 Pagos' },
-                    { value: '6', label: '6 Pagos' }
+                    { value: '4', label: '4 Pagos' },
+                    { value: '6', label: '6 Pagos' },
+                    { value: '12', label: '12 Pagos' }
                   ]} 
                 />
                 <Select 
@@ -2762,7 +2984,14 @@ function ClientsView({
                           #{payment.installmentNumber}
                         </div>
                         <div>
-                          <p className="text-sm font-black text-primary dark:text-slate-200 tracking-tight">Vencimiento: {format(parseISO(payment.dueDate), 'dd/MM/yyyy')}</p>
+                          <div className="flex items-center gap-2">
+                            <p className="text-sm font-black text-primary dark:text-slate-200 tracking-tight">Vencimiento: {format(parseISO(payment.dueDate), 'dd/MM/yyyy')}</p>
+                            {(payment.isUpfront || (payment.installmentNumber === 1 && payment.status === 'paid' && clientPaymentsList.some(p => p.installmentNumber === 1 && p.status === 'pending'))) && (
+                              <span className="text-[8px] font-black text-secondary bg-secondary/10 border border-secondary/20 px-2 py-0.5 rounded-full uppercase tracking-widest">
+                                Anticipo
+                              </span>
+                            )}
+                          </div>
                           <p className="text-[10px] font-bold text-primary/40 dark:text-slate-500 uppercase tracking-widest">Estado: {payment.status === 'paid' ? 'Cobrado' : 'Pendiente'}</p>
                         </div>
                       </div>
@@ -2856,6 +3085,14 @@ function PaymentsView({
   const [arsRate, setArsRate] = useState(1200); // Default placeholder rate
   const [filterStatus, setFilterStatus] = useState<'all' | 'paid' | 'pending'>('all');
   const [isLoadingRate, setIsLoadingRate] = useState(false);
+  const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc' }>({ key: 'dueDate', direction: 'asc' });
+
+  const handleSort = (key: string) => {
+    setSortConfig(prev => ({
+      key,
+      direction: prev.key === key && prev.direction === 'asc' ? 'desc' : 'asc'
+    }));
+  };
 
   useEffect(() => {
     if (isPaying) {
@@ -2882,11 +3119,27 @@ function PaymentsView({
   }, []);
 
   const filteredPayments = useMemo(() => {
-    return payments.filter(p => {
+    const filtered = payments.filter(p => {
       const matchesStatus = filterStatus === 'all' || p.status === filterStatus;
-      return matchesStatus;
+      const matchesSearch = !searchTerm || 
+        p.clientName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        p.amountUSD.toString().includes(searchTerm) ||
+        p.installmentNumber.toString().includes(searchTerm);
+      return matchesStatus && matchesSearch;
     });
-  }, [payments, filterStatus]);
+
+    return [...filtered].sort((a, b) => {
+      const aValue = a[sortConfig.key as keyof Payment];
+      const bValue = b[sortConfig.key as keyof Payment];
+
+      if (aValue === bValue) return 0;
+      if (aValue === undefined || aValue === null) return 1;
+      if (bValue === undefined || bValue === null) return -1;
+
+      const comparison = aValue < bValue ? -1 : 1;
+      return sortConfig.direction === 'asc' ? comparison : -comparison;
+    });
+  }, [payments, filterStatus, sortConfig, searchTerm]);
 
   const handleProcessPayment = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -2989,11 +3242,11 @@ function PaymentsView({
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="bg-primary/5 dark:bg-slate-900/50 border-b border-primary/5 dark:border-slate-700">
-                <th className="px-8 py-5 text-[10px] font-black text-primary/40 dark:text-slate-500 uppercase tracking-widest">Cliente</th>
-                <th className="px-8 py-5 text-[10px] font-black text-primary/40 dark:text-slate-500 uppercase tracking-widest">Cuota</th>
-                <th className="px-8 py-5 text-[10px] font-black text-primary/40 dark:text-slate-500 uppercase tracking-widest">Vencimiento</th>
-                <th className="px-8 py-5 text-[10px] font-black text-primary/40 dark:text-slate-500 uppercase tracking-widest">Monto (USD)</th>
-                <th className="px-8 py-5 text-[10px] font-black text-primary/40 dark:text-slate-500 uppercase tracking-widest">Estado</th>
+                <SortHeader label="Cliente" sortKey="clientName" currentSort={sortConfig} onSort={handleSort} />
+                <SortHeader label="Cuota" sortKey="installmentNumber" currentSort={sortConfig} onSort={handleSort} />
+                <SortHeader label="Vencimiento" sortKey="dueDate" currentSort={sortConfig} onSort={handleSort} />
+                <SortHeader label="Monto (USD)" sortKey="amountUSD" currentSort={sortConfig} onSort={handleSort} />
+                <SortHeader label="Estado" sortKey="status" currentSort={sortConfig} onSort={handleSort} />
                 <th className="px-8 py-5 text-[10px] font-black text-primary/40 dark:text-slate-500 uppercase tracking-widest">Factura</th>
                 <th className="px-8 py-5 text-[10px] font-black text-primary/40 dark:text-slate-500 uppercase tracking-widest text-left">Acción</th>
               </tr>
@@ -3008,7 +3261,16 @@ function PaymentsView({
 
                 return (
                   <tr key={payment.id} className="hover:bg-primary/[0.02] dark:hover:bg-slate-800/50 transition-colors group">
-                    <td className="px-8 py-5 font-black text-primary dark:text-slate-100 tracking-tight">{payment.clientName}</td>
+                    <td className="px-8 py-5">
+                      <div className="flex flex-col gap-1">
+                        <span className="font-black text-primary dark:text-slate-100 tracking-tight">{payment.clientName}</span>
+                        {(payment.isUpfront || (payment.installmentNumber === 1 && payment.status === 'paid' && filteredPayments.some(p => p.clientId === payment.clientId && p.installmentNumber === 1 && p.status === 'pending'))) && (
+                          <span className="text-[8px] font-black text-secondary bg-secondary/10 border border-secondary/20 px-2 py-0.5 rounded-full uppercase tracking-widest w-fit">
+                            Anticipo
+                          </span>
+                        )}
+                      </div>
+                    </td>
                     <td className="px-8 py-5 text-sm font-bold text-primary/60 dark:text-slate-400 italic">#{payment.installmentNumber}</td>
                     <td className="px-8 py-5">
                       <div className="flex flex-col">
@@ -3103,7 +3365,14 @@ function PaymentsView({
               <div key={payment.id} className="p-4 space-y-4">
                 <div className="flex justify-between items-start">
                   <div>
-                    <h4 className="font-black text-primary dark:text-slate-100 tracking-tight">{payment.clientName}</h4>
+                    <div className="flex items-center gap-2">
+                      <h4 className="font-black text-primary dark:text-slate-100 tracking-tight">{payment.clientName}</h4>
+                      {(payment.isUpfront || (payment.installmentNumber === 1 && payment.status === 'paid' && filteredPayments.some(p => p.clientId === payment.clientId && p.installmentNumber === 1 && p.status === 'pending'))) && (
+                        <span className="text-[7px] font-black text-secondary bg-secondary/10 border border-secondary/20 px-1.5 py-0.5 rounded-full uppercase tracking-widest">
+                          Anticipo
+                        </span>
+                      )}
+                    </div>
                     <p className="text-[10px] font-bold text-primary/40 dark:text-slate-500 uppercase tracking-widest mt-0.5">Cuota #{payment.installmentNumber}</p>
                   </div>
                   <span className={cn(
@@ -3299,6 +3568,14 @@ function InvoicesView({ payments, clients, searchTerm, setSearchTerm }: { paymen
   const [filterStatus, setFilterStatus] = useState<InvoiceStatus | 'all'>('all');
   const [filterType, setFilterType] = useState<InvoiceType | 'all'>('all');
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
+  const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc' }>({ key: 'paymentDate', direction: 'desc' });
+
+  const handleSort = (key: string) => {
+    setSortConfig(prev => ({
+      key,
+      direction: prev.key === key && prev.direction === 'asc' ? 'desc' : 'asc'
+    }));
+  };
 
   const toggleRow = (id: string) => {
     const newExpanded = new Set(expandedRows);
@@ -3311,7 +3588,7 @@ function InvoicesView({ payments, clients, searchTerm, setSearchTerm }: { paymen
   };
 
   const filteredInvoices = useMemo(() => {
-    return payments
+    const filtered = payments
       .filter(p => p.status === 'paid' && p.invoiceStatus !== 'not_required')
       .filter(p => {
         const matchesStatus = filterStatus === 'all' || p.invoiceStatus === filterStatus;
@@ -3320,9 +3597,26 @@ function InvoicesView({ payments, clients, searchTerm, setSearchTerm }: { paymen
           p.clientName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
           p.invoiceNumber?.toLowerCase().includes(searchTerm.toLowerCase());
         return matchesStatus && matchesType && matchesSearch;
-      })
-      .sort((a, b) => (b.paymentDate || '').localeCompare(a.paymentDate || ''));
-  }, [payments, filterStatus, filterType, searchTerm]);
+      });
+
+    return [...filtered].sort((a, b) => {
+      let aValue = a[sortConfig.key as keyof Payment];
+      let bValue = b[sortConfig.key as keyof Payment];
+
+      // Special handling for nested or derived values if needed
+      if (sortConfig.key === 'paymentDate') {
+        aValue = aValue || '';
+        bValue = bValue || '';
+      }
+
+      if (aValue === bValue) return 0;
+      if (aValue === undefined || aValue === null) return 1;
+      if (bValue === undefined || bValue === null) return -1;
+
+      const comparison = aValue < bValue ? -1 : 1;
+      return sortConfig.direction === 'asc' ? comparison : -comparison;
+    });
+  }, [payments, filterStatus, filterType, searchTerm, sortConfig]);
 
   const handleUpdateInvoice = async (paymentId: string, data: Partial<Payment>) => {
     try {
@@ -3367,12 +3661,12 @@ function InvoicesView({ payments, clients, searchTerm, setSearchTerm }: { paymen
             <thead>
               <tr className="bg-primary/5 dark:bg-slate-900/50 border-b border-primary/5 dark:border-slate-700">
                 <th className="px-6 py-4 text-[10px] font-black text-primary/40 dark:text-slate-500 uppercase tracking-widest w-10"></th>
-                <th className="px-6 py-4 text-[10px] font-black text-primary/40 dark:text-slate-500 uppercase tracking-widest">Estado</th>
-                <th className="px-6 py-4 text-[10px] font-black text-primary/40 dark:text-slate-500 uppercase tracking-widest">Cliente</th>
-                <th className="px-6 py-4 text-[10px] font-black text-primary/40 dark:text-slate-500 uppercase tracking-widest">Pago / Cuenta</th>
-                <th className="px-6 py-4 text-[10px] font-black text-primary/40 dark:text-slate-500 uppercase tracking-widest">Monto</th>
-                <th className="px-6 py-4 text-[10px] font-black text-primary/40 dark:text-slate-500 uppercase tracking-widest">Cuota</th>
-                <th className="px-6 py-4 text-[10px] font-black text-primary/40 dark:text-slate-500 uppercase tracking-widest">Factura</th>
+                <SortHeader label="Estado" sortKey="invoiceStatus" currentSort={sortConfig} onSort={handleSort} className="px-6 py-4" />
+                <SortHeader label="Cliente" sortKey="clientName" currentSort={sortConfig} onSort={handleSort} className="px-6 py-4" />
+                <SortHeader label="Pago / Cuenta" sortKey="paymentMethod" currentSort={sortConfig} onSort={handleSort} className="px-6 py-4" />
+                <SortHeader label="Monto" sortKey="amountUSD" currentSort={sortConfig} onSort={handleSort} className="px-6 py-4" />
+                <SortHeader label="Cuota" sortKey="installmentNumber" currentSort={sortConfig} onSort={handleSort} className="px-6 py-4" />
+                <SortHeader label="Factura" sortKey="invoiceNumber" currentSort={sortConfig} onSort={handleSort} className="px-6 py-4" />
               </tr>
             </thead>
             <tbody className="divide-y divide-primary/5 dark:divide-slate-800">
@@ -3969,6 +4263,14 @@ function CashflowView({
   // Filter states
   const [filterType, setFilterType] = useState<'all' | 'income' | 'expense'>('all');
   const [timeFilter, setTimeFilter] = useState<'all' | 'week' | 'month' | 'quarter' | 'year'>('all');
+  const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc' }>({ key: 'date', direction: 'desc' });
+
+  const handleSort = (key: string) => {
+    setSortConfig(prev => ({
+      key,
+      direction: prev.key === key && prev.direction === 'asc' ? 'desc' : 'asc'
+    }));
+  };
 
   const [editingEntry, setEditingEntry] = useState<CashflowEntry | null>(null);
   const [isDeletingId, setIsDeletingId] = useState<string | null>(null);
@@ -4008,8 +4310,18 @@ function CashflowView({
       filtered = filtered.filter(entry => isAfter(parseISO(entry.date), startDate) || entry.date === format(startDate, 'yyyy-MM-dd'));
     }
 
-    return filtered;
-  }, [cashflow, filterType, timeFilter]);
+    return [...filtered].sort((a, b) => {
+      const aValue = a[sortConfig.key as keyof CashflowEntry];
+      const bValue = b[sortConfig.key as keyof CashflowEntry];
+
+      if (aValue === bValue) return 0;
+      if (aValue === undefined || aValue === null) return 1;
+      if (bValue === undefined || bValue === null) return -1;
+
+      const comparison = aValue < bValue ? -1 : 1;
+      return sortConfig.direction === 'asc' ? comparison : -comparison;
+    });
+  }, [cashflow, filterType, timeFilter, sortConfig]);
 
   const totals = useMemo(() => {
     return filteredCashflow.reduce((acc, entry) => {
@@ -4195,6 +4507,24 @@ function CashflowView({
             <option value="quarter">Este trimestre</option>
             <option value="year">Este año</option>
           </select>
+
+          <div className="flex items-center gap-2 bg-white dark:bg-slate-800 p-1 rounded-xl border border-slate-100 dark:border-slate-700 shadow-sm">
+            <select 
+              value={sortConfig.key}
+              onChange={(e) => handleSort(e.target.value)}
+              className="bg-transparent text-xs font-bold text-primary dark:text-white outline-none cursor-pointer px-2"
+            >
+              <option value="date">Fecha</option>
+              <option value="amountUSD">Monto</option>
+              <option value="description">Descripción</option>
+            </select>
+            <button 
+              onClick={() => handleSort(sortConfig.key)}
+              className="p-1 text-primary/20 hover:text-primary transition-colors"
+            >
+              {sortConfig.direction === 'asc' ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+            </button>
+          </div>
 
           <Button variant="tertiary" onClick={() => setIsAdding(true)} className="px-8">
             <Plus className="w-5 h-5" />
@@ -4456,6 +4786,25 @@ function PayrollView({
   const [isPayingStaff, setIsPayingStaff] = useState<StaffMember | null>(null);
   const [editingStaff, setEditingStaff] = useState<StaffMember | null>(null);
   const [isDeletingStaffId, setIsDeletingStaffId] = useState<string | null>(null);
+  const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc' }>({ key: 'name', direction: 'asc' });
+
+  const handleSort = (key: string) => {
+    setSortConfig(prev => ({
+      key,
+      direction: prev.key === key && prev.direction === 'asc' ? 'desc' : 'asc'
+    }));
+  };
+
+  const sortedStaff = useMemo(() => {
+    return [...staff].sort((a, b) => {
+      const aValue = a[sortConfig.key as keyof StaffMember] || '';
+      const bValue = b[sortConfig.key as keyof StaffMember] || '';
+
+      if (aValue === bValue) return 0;
+      const comparison = aValue < bValue ? -1 : 1;
+      return sortConfig.direction === 'asc' ? comparison : -comparison;
+    });
+  }, [staff, sortConfig]);
 
   const nextPaymentDate = useMemo(() => {
     const now = new Date();
@@ -5024,10 +5373,29 @@ function PayrollView({
         <div className="space-y-6">
           <div className="flex justify-between items-center">
             <h3 className="text-lg font-black text-primary uppercase italic tracking-tight">Integrantes de la <span className="text-secondary">Consultora</span></h3>
-            <Button onClick={() => setIsAddingStaff(true)} className="text-xs py-2">
-              <Plus className="w-4 h-4" />
-              Nuevo Integrante
-            </Button>
+            <div className="flex items-center gap-4">
+              <div className="flex items-center gap-2 bg-white dark:bg-slate-800 p-1 rounded-xl border border-primary/5 dark:border-slate-700">
+                <select 
+                  value={sortConfig.key}
+                  onChange={(e) => handleSort(e.target.value)}
+                  className="bg-transparent text-[10px] font-black uppercase tracking-widest text-primary/40 dark:text-slate-500 outline-none cursor-pointer px-2"
+                >
+                  <option value="name">Nombre</option>
+                  <option value="role">Rol</option>
+                  <option value="baseSalaryUSD">Sueldo</option>
+                </select>
+                <button 
+                  onClick={() => handleSort(sortConfig.key)}
+                  className="p-1 text-primary/20 hover:text-primary transition-colors"
+                >
+                  {sortConfig.direction === 'asc' ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                </button>
+              </div>
+              <Button onClick={() => setIsAddingStaff(true)} className="text-xs py-2">
+                <Plus className="w-4 h-4" />
+                Nuevo Integrante
+              </Button>
+            </div>
           </div>
           
           {staff.length === 0 ? (
@@ -5037,7 +5405,7 @@ function PayrollView({
             </Card>
           ) : (
             <div className="grid grid-cols-1 gap-3">
-              {staff.map(s => (
+              {sortedStaff.map(s => (
                 <Card key={s.id} className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 group">
                   <div className="flex items-center gap-4">
                     <div className="w-10 h-10 bg-primary/5 dark:bg-slate-800 rounded-xl flex items-center justify-center text-primary dark:text-secondary font-black shrink-0">

@@ -60,6 +60,7 @@ export interface Payment {
   invoiceType?: InvoiceType;
   invoiceUrl?: string;
   invoiceNumber?: string;
+  isUpfront?: boolean;
   createdAt: string;
   deletedAt?: string;
 }
