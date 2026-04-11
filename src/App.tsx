@@ -51,6 +51,8 @@ import {
   AlertCircle,
   FileText,
   Download,
+  Upload,
+  FileSpreadsheet,
   X,
   Settings,
   Moon,
@@ -88,6 +90,7 @@ import {
 } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { Toaster, toast } from 'sonner';
+import Papa from 'papaparse';
 import { 
   AreaChart,
   Area,
@@ -2014,6 +2017,20 @@ function ClientsView({
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [editingClient, setEditingClient] = useState<Client | null>(null);
   const [viewingDetails, setViewingDetails] = useState<Client | null>(null);
+  const [statusFilter, setStatusFilter] = useState<'pending' | 'completed'>('pending');
+  const [isImporting, setIsImporting] = useState(false);
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
+
+  const filteredByStatus = useMemo(() => {
+    return clients.filter(client => {
+      const clientPayments = payments.filter(p => p.clientId === client.id && !p.deletedAt);
+      const paidCount = clientPayments.filter(p => p.status === 'paid').length;
+      const totalCount = client.installments;
+      const isFullyPaid = paidCount >= totalCount && totalCount > 0;
+      
+      return statusFilter === 'completed' ? isFullyPaid : !isFullyPaid;
+    });
+  }, [clients, payments, statusFilter]);
 
   const handleAddClient = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -2184,13 +2201,159 @@ function ClientsView({
     }
   };
 
+  const handleBulkImport = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsImporting(true);
+    Papa.parse(file, {
+      header: true,
+      skipEmptyLines: true,
+      complete: async (results) => {
+        const data = results.data as any[];
+        let successCount = 0;
+        let errorCount = 0;
+
+        toast.info(`Iniciando importación de ${data.length} registros...`);
+
+        for (const row of data) {
+          try {
+            const firstName = row.firstName || row.Nombre || '';
+            const lastName = row.lastName || row.Apellido || '';
+            const totalUSD = Number(row.totalAmountUSD || row.MontoTotal || 0);
+            const installments = Number(row.installments || row.Cuotas || 1);
+            const paidInstallments = Number(row.paidInstallments || row.CuotasPagadas || 0);
+            
+            if (!firstName || !lastName || isNaN(totalUSD) || totalUSD <= 0) {
+              errorCount++;
+              continue;
+            }
+
+            const clientData = {
+              firstName,
+              lastName,
+              email: row.email || row.Email || '',
+              phone: row.phone || row.Telefono || '',
+              dni: row.dni || row.DNI || '',
+              businessName: row.businessName || row.Empresa || '',
+              address: row.address || row.Direccion || '',
+              city: row.city || row.Ciudad || '',
+              province: row.province || row.Provincia || '',
+              country: row.country || row.Pais || '',
+              installments,
+              totalAmountUSD: totalUSD,
+              companyId: userProfile.companyId,
+              createdAt: row.startDate ? new Date(row.startDate).toISOString() : new Date().toISOString(),
+            };
+
+            const docRef = await addDoc(collection(db, 'clients'), clientData);
+            
+            // Generate payments
+            const installmentAmount = totalUSD / installments;
+            const roundedInstallmentAmount = Math.round(installmentAmount);
+            
+            for (let i = 1; i <= installments; i++) {
+              const dueDate = new Date(clientData.createdAt);
+              dueDate.setMonth(dueDate.getMonth() + i - 1);
+              
+              const currentAmount = i === installments 
+                ? totalUSD - (roundedInstallmentAmount * (installments - 1))
+                : roundedInstallmentAmount;
+              
+              const isPaid = i <= paidInstallments;
+
+              await addDoc(collection(db, 'payments'), {
+                companyId: userProfile.companyId,
+                clientId: docRef.id,
+                clientName: `${clientData.firstName} ${clientData.lastName}`,
+                installmentNumber: i,
+                amount: currentAmount,
+                currency: 'USD',
+                amountUSD: currentAmount,
+                dueDate: dueDate.toISOString(),
+                status: isPaid ? 'paid' : 'pending',
+                paidAt: isPaid ? dueDate.toISOString() : null,
+                createdAt: new Date().toISOString()
+              });
+            }
+            successCount++;
+          } catch (err) {
+            console.error("Error importing row:", err, row);
+            errorCount++;
+          }
+        }
+
+        setIsImporting(false);
+        if (e.target) e.target.value = ''; // Reset input
+        
+        if (successCount > 0) {
+          toast.success(`Importación finalizada: ${successCount} clientes agregados.`);
+        }
+        if (errorCount > 0) {
+          toast.error(`${errorCount} registros fallaron. Revisa el formato del archivo.`);
+        }
+      },
+      error: (error) => {
+        console.error("CSV Parse Error:", error);
+        setIsImporting(false);
+        toast.error("Error al procesar el archivo CSV");
+      }
+    });
+  };
+
+  const downloadTemplate = () => {
+    const headers = [
+      'firstName', 'lastName', 'email', 'phone', 'dni', 'businessName', 
+      'totalAmountUSD', 'installments', 'paidInstallments', 'startDate',
+      'address', 'city', 'province', 'country'
+    ];
+    const csvContent = headers.join(',') + '\n' + 
+      'Juan,Perez,juan@example.com,1122334455,20123456,Empresa SA,1200,12,3,2024-01-01,Calle Falsa 123,CABA,Buenos Aires,Argentina';
+    
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    link.setAttribute('href', url);
+    link.setAttribute('download', 'plantilla_migracion_clientes.csv');
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   const clientPayments = viewingDetails ? payments.filter(p => p.clientId === viewingDetails.id) : [];
   const clientTransactions = viewingDetails ? cashflow.filter(c => c.paymentId && clientPayments.some(p => p.id === c.paymentId)) : [];
 
 
   return (
     <div className="space-y-8">
-      <div className="flex flex-col md:flex-row md:items-center justify-end gap-6">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
+        <div className="flex items-center gap-2">
+          <input 
+            type="file" 
+            ref={fileInputRef} 
+            onChange={handleBulkImport} 
+            accept=".csv" 
+            className="hidden" 
+          />
+          <Button 
+            variant="outline" 
+            onClick={() => fileInputRef.current?.click()}
+            disabled={isImporting}
+            className="px-6 border-primary/10 hover:bg-primary/5"
+          >
+            {isImporting ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+            Importar CSV
+          </Button>
+          <Button 
+            variant="ghost" 
+            onClick={downloadTemplate}
+            className="px-4 text-[10px] font-black uppercase tracking-widest text-primary/40 hover:text-primary"
+          >
+            <Download className="w-3 h-3" />
+            Descargar Plantilla
+          </Button>
+        </div>
         <Button variant="tertiary" onClick={() => setIsAdding(true)} className="px-8">
           <Plus className="w-5 h-5" />
           Nuevo Cliente
@@ -2199,8 +2362,39 @@ function ClientsView({
 
       <ContextualSearch value={searchTerm} onChange={setSearchTerm} placeholder="Buscar por nombre, email, empresa o DNI/CUIL..." />
 
+      <div className="flex items-center gap-2 bg-white dark:bg-slate-800 p-1.5 rounded-2xl border border-primary/5 dark:border-slate-700 w-fit mb-4">
+        <button
+          onClick={() => setStatusFilter('pending')}
+          className={cn(
+            "px-6 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest transition-all",
+            statusFilter === 'pending'
+              ? "bg-primary text-white shadow-lg shadow-primary/20"
+              : "text-primary/40 hover:text-primary dark:text-slate-500 dark:hover:text-slate-300"
+          )}
+        >
+          Pendientes ({clients.filter(c => {
+            const cp = payments.filter(p => p.clientId === c.id && !p.deletedAt);
+            return cp.filter(p => p.status === 'paid').length < c.installments;
+          }).length})
+        </button>
+        <button
+          onClick={() => setStatusFilter('completed')}
+          className={cn(
+            "px-6 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest transition-all",
+            statusFilter === 'completed'
+              ? "bg-green-600 text-white shadow-lg shadow-green-600/20"
+              : "text-primary/40 hover:text-primary dark:text-slate-500 dark:hover:text-slate-300"
+          )}
+        >
+          Completados ({clients.filter(c => {
+            const cp = payments.filter(p => p.clientId === c.id && !p.deletedAt);
+            return cp.filter(p => p.status === 'paid').length >= c.installments && c.installments > 0;
+          }).length})
+        </button>
+      </div>
+
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-8">
-        {clients.map(client => {
+        {filteredByStatus.map(client => {
           const clientPayments = payments.filter(p => p.clientId === client.id && !p.deletedAt);
           const paidCount = clientPayments.filter(p => p.status === 'paid').length;
           const totalCount = client.installments;
