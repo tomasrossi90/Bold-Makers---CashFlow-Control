@@ -15,6 +15,7 @@ import {
   orderBy, 
   where,
   getDoc,
+  getDocs,
   serverTimestamp,
   Timestamp,
   setDoc
@@ -495,7 +496,17 @@ function TeamManagement({ userProfile }: { userProfile: any }) {
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [userProfile, setUserProfile] = useState<{ uid: string; email: string; companyId: string; role: 'admin' | 'editor' | 'viewer' } | null>(null);
-  const [company, setCompany] = useState<{ id: string; name: string; ownerId: string } | null>(null);
+  const [company, setCompany] = useState<{ 
+    id: string; 
+    name: string; 
+    tradeName?: string;
+    address?: string;
+    taxId?: string;
+    phone?: string;
+    email?: string;
+    logoUrl?: string;
+    ownerId: string;
+  } | null>(null);
   const [loading, setLoading] = useState(true);
   const [profileLoading, setProfileLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<'dashboard' | 'clients' | 'payments' | 'cashflow' | 'payroll' | 'trash' | 'reports' | 'settings' | 'team'>('dashboard');
@@ -674,6 +685,17 @@ export default function App() {
   }, [activePayments]);
 
   useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const inviteToken = urlParams.get('invite');
+    if (inviteToken) {
+      sessionStorage.setItem('inviteToken', inviteToken);
+      // Clean URL
+      window.history.replaceState({}, document.title, window.location.pathname);
+      toast.info("Invitación detectada. Inicia sesión para unirte al equipo.");
+    }
+  }, []);
+
+  useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (u) => {
       setUser(u);
       setLoading(false);
@@ -702,6 +724,44 @@ export default function App() {
             setCompany({ id: companyDoc.id, ...companyDoc.data() } as any);
           }
         } else {
+          // Check for pending invitation
+          const inviteToken = sessionStorage.getItem('inviteToken');
+          if (inviteToken) {
+            const q = query(collection(db, 'invitations'), where('token', '==', inviteToken), where('status', '==', 'pending'));
+            const inviteSnap = await getDocs(q);
+            
+            if (!inviteSnap.empty) {
+              const inviteDoc = inviteSnap.docs[0];
+              const inviteData = inviteDoc.data();
+              
+              // Check if email matches (optional, but safer)
+              // if (inviteData.email === user.email) { ... }
+
+              // Create profile
+              const newProfile = {
+                uid: user.uid,
+                email: user.email,
+                companyId: inviteData.companyId,
+                role: inviteData.role,
+                createdAt: new Date().toISOString()
+              };
+              
+              await setDoc(doc(db, 'users', user.uid), newProfile);
+              await updateDoc(doc(db, 'invitations', inviteDoc.id), { status: 'accepted' });
+              
+              setUserProfile(newProfile as any);
+              sessionStorage.removeItem('inviteToken');
+              toast.success("¡Te has unido al equipo con éxito!");
+              
+              const companyDoc = await getDoc(doc(db, 'companies', inviteData.companyId));
+              if (companyDoc.exists()) {
+                setCompany({ id: companyDoc.id, ...companyDoc.data() } as any);
+              }
+              setProfileLoading(false);
+              return;
+            }
+          }
+          
           setUserProfile(null);
           setCompany(null);
         }
@@ -1114,7 +1174,19 @@ export default function App() {
         </header>
 
         <div className="p-8 bg-slate-50 dark:bg-slate-950">
-          {activeTab === 'dashboard' && <DashboardView clients={filteredClients} payments={filteredPayments} cashflow={filteredCashflow} onNavigate={setActiveTab} />}
+          {activeTab === 'dashboard' && (
+            <div className="space-y-8">
+              {!company?.tradeName && userProfile?.role === 'admin' && (
+                <CompanyOnboarding company={company} setCompany={setCompany} userProfile={userProfile} />
+              )}
+              <DashboardView 
+                clients={filteredClients} 
+                payments={filteredPayments} 
+                cashflow={filteredCashflow} 
+                onNavigate={setActiveTab} 
+              />
+            </div>
+          )}
           {activeTab === 'clients' && <ClientsView clients={filteredClients} isAdding={isAddingClient} setIsAdding={setIsAddingClient} payments={payments} cashflow={cashflow} staff={activeStaff} settings={settings} searchTerm={searchTerm} setSearchTerm={setSearchTerm} onNavigate={setActiveTab} userProfile={userProfile} />}
           {activeTab === 'payments' && <PaymentsView clients={filteredClients} payments={filteredPayments} searchTerm={searchTerm} setSearchTerm={setSearchTerm} generateCommissions={generateCommissions} onNavigate={setActiveTab} userProfile={userProfile} />}
           {activeTab === 'invoices' && <InvoicesView payments={filteredPayments} clients={filteredClients} searchTerm={searchTerm} setSearchTerm={setSearchTerm} />}
@@ -1419,6 +1491,172 @@ function LandingPage({ onLogin }: { onLogin: () => void }) {
   );
 }
 
+function CompanyOnboarding({ 
+  company, 
+  setCompany, 
+  userProfile 
+}: { 
+  company: any; 
+  setCompany: any; 
+  userProfile: any;
+}) {
+  const [isSaving, setIsSaving] = useState(false);
+  const [formData, setFormData] = useState({
+    name: company?.name || '',
+    tradeName: company?.tradeName || '',
+    address: company?.address || '',
+    taxId: company?.taxId || '',
+    phone: company?.phone || '',
+    email: company?.email || '',
+    logoUrl: company?.logoUrl || ''
+  });
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!formData.name.trim() || !formData.tradeName.trim()) {
+      toast.error('El nombre legal y el nombre fantasía son obligatorios');
+      return;
+    }
+
+    setIsSaving(true);
+    try {
+      await updateDoc(doc(db, 'companies', userProfile.companyId), {
+        ...formData,
+        updatedAt: new Date().toISOString()
+      });
+      setCompany((prev: any) => ({ ...prev, ...formData }));
+      toast.success('¡Perfil de empresa configurado con éxito!');
+    } catch (err) {
+      console.error("Error saving onboarding:", err);
+      toast.error('Error al guardar los datos');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  return (
+    <motion.div 
+      initial={{ opacity: 0, scale: 0.95 }}
+      animate={{ opacity: 1, scale: 1 }}
+      className="relative"
+    >
+      <Card className="p-10 border-none shadow-2xl shadow-primary/10 bg-white dark:bg-slate-900 overflow-hidden">
+        <div className="absolute top-0 right-0 w-64 h-64 bg-secondary/5 rounded-full -translate-y-1/2 translate-x-1/2 blur-3xl"></div>
+        <div className="absolute bottom-0 left-0 w-64 h-64 bg-tertiary/5 rounded-full translate-y-1/2 -translate-x-1/2 blur-3xl"></div>
+        
+        <div className="relative z-10">
+          <div className="flex items-center gap-4 mb-8">
+            <div className="w-16 h-16 bg-primary rounded-2xl flex items-center justify-center text-white shadow-xl shadow-primary/20">
+              <TrendingUp className="w-8 h-8 text-tertiary" />
+            </div>
+            <div>
+              <h2 className="text-3xl font-black text-primary dark:text-secondary uppercase italic tracking-tighter">¡Bienvenido a Bold Makers!</h2>
+              <p className="text-slate-400 font-medium">Para comenzar, necesitamos configurar los datos de tu empresa.</p>
+            </div>
+          </div>
+
+          <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-2 gap-8">
+            <div className="space-y-6">
+              <div className="space-y-2">
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Razón Social / Nombre Legal</label>
+                <input 
+                  type="text" 
+                  required
+                  value={formData.name}
+                  onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
+                  className="w-full px-5 py-4 bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-700 rounded-2xl text-sm font-bold text-primary dark:text-white outline-none focus:ring-4 focus:ring-primary/5 transition-all"
+                  placeholder="Ej: Bold Makers Studio S.R.L."
+                />
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Nombre Fantasía</label>
+                <input 
+                  type="text" 
+                  required
+                  value={formData.tradeName}
+                  onChange={(e) => setFormData(prev => ({ ...prev, tradeName: e.target.value }))}
+                  className="w-full px-5 py-4 bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-700 rounded-2xl text-sm font-bold text-primary dark:text-white outline-none focus:ring-4 focus:ring-primary/5 transition-all"
+                  placeholder="Ej: Bold Makers"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Dirección Comercial</label>
+                <input 
+                  type="text" 
+                  value={formData.address}
+                  onChange={(e) => setFormData(prev => ({ ...prev, address: e.target.value }))}
+                  className="w-full px-5 py-4 bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-700 rounded-2xl text-sm font-bold text-primary dark:text-white outline-none focus:ring-4 focus:ring-primary/5 transition-all"
+                  placeholder="Ej: Av. del Libertador 1234, CABA"
+                />
+              </div>
+            </div>
+
+            <div className="space-y-6">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">CUIT / DNI</label>
+                  <input 
+                    type="text" 
+                    value={formData.taxId}
+                    onChange={(e) => setFormData(prev => ({ ...prev, taxId: e.target.value }))}
+                    className="w-full px-5 py-4 bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-700 rounded-2xl text-sm font-bold text-primary dark:text-white outline-none focus:ring-4 focus:ring-primary/5 transition-all"
+                    placeholder="30-12345678-9"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Teléfono</label>
+                  <input 
+                    type="text" 
+                    value={formData.phone}
+                    onChange={(e) => setFormData(prev => ({ ...prev, phone: e.target.value }))}
+                    className="w-full px-5 py-4 bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-700 rounded-2xl text-sm font-bold text-primary dark:text-white outline-none focus:ring-4 focus:ring-primary/5 transition-all"
+                    placeholder="+54 9 11..."
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">URL del Logo</label>
+                <div className="flex gap-4 items-center">
+                  <input 
+                    type="text" 
+                    value={formData.logoUrl}
+                    onChange={(e) => setFormData(prev => ({ ...prev, logoUrl: e.target.value }))}
+                    className="flex-1 px-5 py-4 bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-700 rounded-2xl text-sm font-bold text-primary dark:text-white outline-none focus:ring-4 focus:ring-primary/5 transition-all"
+                    placeholder="https://..."
+                  />
+                  {formData.logoUrl && (
+                    <div className="w-14 h-14 rounded-2xl bg-white dark:bg-slate-800 border border-slate-100 dark:border-slate-700 overflow-hidden flex items-center justify-center p-2">
+                      <img src={formData.logoUrl} alt="Logo" className="max-w-full max-h-full object-contain" referrerPolicy="no-referrer" />
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <Button 
+                type="submit" 
+                disabled={isSaving}
+                className="w-full py-5 text-lg shadow-2xl shadow-primary/20 mt-2"
+              >
+                {isSaving ? (
+                  <RefreshCw className="w-6 h-6 animate-spin" />
+                ) : (
+                  <>
+                    Comenzar ahora
+                    <ArrowRight className="w-6 h-6" />
+                  </>
+                )}
+              </Button>
+            </div>
+          </form>
+        </div>
+      </Card>
+    </motion.div>
+  );
+}
+
 function DashboardView({ 
   clients, 
   payments, 
@@ -1561,7 +1799,7 @@ function DashboardView({
 
   return (
     <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-700">
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
         <StatCard 
           label="Balance Total" 
           value={formatCurrency(stats.totalRevenue)} 
@@ -1586,14 +1824,6 @@ function DashboardView({
           value={formatCurrency(stats.profit)} 
           icon={<Star className="w-6 h-6" />}
           color="tertiary"
-        />
-        <StatCard 
-          label="Facturas Pendientes" 
-          value={stats.pendingInvoices.toString()} 
-          icon={<FileText className="w-5 h-5" />}
-          trend={stats.pendingInvoices > 0 ? "Atención" : "Al día"}
-          color={stats.pendingInvoices > 0 ? "secondary" : "primary"}
-          onClick={() => onNavigate('invoices')}
         />
       </div>
 
@@ -2340,33 +2570,48 @@ function ClientsView({
 
         for (const row of data) {
           try {
-            const firstName = row.firstName || row.Nombre || '';
-            const lastName = row.lastName || row.Apellido || '';
+            const firstName = (row.firstName || row.Nombre || '').trim();
+            const lastName = (row.lastName || row.Apellido || '').trim();
             const totalUSD = Number(row.totalAmountUSD || row.MontoTotal || 0);
             const upfrontUSD = Number(row.upfrontPayment || row.Anticipo || 0);
-            const installments = Number(row.installments || row.Cuotas || 1);
+            const installments = Math.max(1, Number(row.installments || row.Cuotas || 1));
             const paidInstallments = Number(row.paidInstallments || row.CuotasPagadas || 0);
             
-            if (!firstName || !lastName || isNaN(totalUSD) || totalUSD <= 0) {
+            if (!firstName || !lastName) {
               errorCount++;
               continue;
             }
 
+            // Robust date parsing for DD/MM/YYYY
+            const parseCSVDate = (dateStr: string) => {
+              if (!dateStr) return new Date().toISOString();
+              const parts = dateStr.split('/');
+              if (parts.length === 3) {
+                const d = parseInt(parts[0], 10);
+                const m = parseInt(parts[1], 10) - 1;
+                const y = parseInt(parts[2], 10);
+                const date = new Date(y, m, d);
+                if (!isNaN(date.getTime())) return date.toISOString();
+              }
+              const date = new Date(dateStr);
+              return !isNaN(date.getTime()) ? date.toISOString() : new Date().toISOString();
+            };
+
             const clientData = {
               firstName,
               lastName,
-              email: row.email || row.Email || '',
-              phone: row.phone || row.Telefono || '',
-              dni: row.dni || row.DNI || '',
-              businessName: row.businessName || row.Empresa || '',
-              address: row.address || row.Direccion || '',
-              city: row.city || row.Ciudad || '',
-              province: row.province || row.Provincia || '',
-              country: row.country || row.Pais || '',
+              email: (row.email || row.Email || '').trim(),
+              phone: (row.phone || row.Telefono || '').trim(),
+              dni: (row.dni || row.DNI || '').trim(),
+              businessName: (row.businessName || row.Empresa || '').trim(),
+              address: (row.address || row.Direccion || '').trim(),
+              city: (row.city || row.Ciudad || '').trim(),
+              province: (row.province || row.Provincia || '').trim(),
+              country: (row.country || row.Pais || '').trim(),
               installments,
               totalAmountUSD: totalUSD,
               companyId: userProfile.companyId,
-              createdAt: row.startDate ? new Date(row.startDate).toISOString() : new Date().toISOString(),
+              createdAt: parseCSVDate(row.startDate),
             };
 
             const docRef = await addDoc(collection(db, 'clients'), clientData);
@@ -2377,7 +2622,7 @@ function ClientsView({
 
             if (upfrontUSD > 0) {
               // First payment is the upfront (Part of Installment 1)
-              await addDoc(collection(db, 'payments'), {
+              const upfrontRef = await addDoc(collection(db, 'payments'), {
                 companyId: userProfile.companyId,
                 clientId: docRef.id,
                 clientName: `${clientData.firstName} ${clientData.lastName}`,
@@ -2389,6 +2634,19 @@ function ClientsView({
                 status: 'paid',
                 isUpfront: true,
                 paidAt: new Date().toISOString(),
+                createdAt: new Date().toISOString()
+              });
+
+              // Add to cashflow for dashboard impact
+              await addDoc(collection(db, 'cashflow'), {
+                companyId: userProfile.companyId,
+                type: 'income',
+                amountUSD: upfrontUSD,
+                category: 'Mentoria',
+                date: clientData.createdAt,
+                description: `Anticipo - ${clientData.firstName} ${clientData.lastName}`,
+                paymentId: upfrontRef.id,
+                clientId: docRef.id,
                 createdAt: new Date().toISOString()
               });
 
@@ -2422,7 +2680,7 @@ function ClientsView({
                   // If migrating, some of these might also be paid
                   const isPaid = i <= paidInstallments;
 
-                  await addDoc(collection(db, 'payments'), {
+                  const paymentRef = await addDoc(collection(db, 'payments'), {
                     companyId: userProfile.companyId,
                     clientId: docRef.id,
                     clientName: `${clientData.firstName} ${clientData.lastName}`,
@@ -2435,6 +2693,21 @@ function ClientsView({
                     paidAt: isPaid ? dueDate.toISOString() : null,
                     createdAt: new Date().toISOString()
                   });
+
+                  // Add to cashflow if paid
+                  if (isPaid) {
+                    await addDoc(collection(db, 'cashflow'), {
+                      companyId: userProfile.companyId,
+                      type: 'income',
+                      amountUSD: currentAmount,
+                      category: 'Mentoria',
+                      date: dueDate.toISOString(),
+                      description: `Pago cuota ${i} - ${clientData.firstName} ${clientData.lastName}`,
+                      paymentId: paymentRef.id,
+                      clientId: docRef.id,
+                      createdAt: new Date().toISOString()
+                    });
+                  }
                 }
               }
             } else {
@@ -2449,7 +2722,7 @@ function ClientsView({
                 
                 const isPaid = i <= paidInstallments;
 
-                await addDoc(collection(db, 'payments'), {
+                const paymentRef = await addDoc(collection(db, 'payments'), {
                   companyId: userProfile.companyId,
                   clientId: docRef.id,
                   clientName: `${clientData.firstName} ${clientData.lastName}`,
@@ -2462,6 +2735,21 @@ function ClientsView({
                   paidAt: isPaid ? dueDate.toISOString() : null,
                   createdAt: new Date().toISOString()
                 });
+
+                // Add to cashflow if paid
+                if (isPaid) {
+                  await addDoc(collection(db, 'cashflow'), {
+                    companyId: userProfile.companyId,
+                    type: 'income',
+                    amountUSD: currentAmount,
+                    category: 'Mentoria',
+                    date: dueDate.toISOString(),
+                    description: `Pago cuota ${i} - ${clientData.firstName} ${clientData.lastName}`,
+                    paymentId: paymentRef.id,
+                    clientId: docRef.id,
+                    createdAt: new Date().toISOString()
+                  });
+                }
               }
             }
             successCount++;
@@ -5607,6 +5895,7 @@ function SettingsView({
   
   // Team management states
   const [users, setUsers] = useState<any[]>([]);
+  const [invitations, setInvitations] = useState<any[]>([]);
   const [isAddingUser, setIsAddingUser] = useState(false);
   const [newEmail, setNewEmail] = useState('');
   const [newRole, setNewRole] = useState<'admin' | 'editor' | 'viewer'>('viewer');
@@ -5627,6 +5916,13 @@ function SettingsView({
     });
   }, [userProfile.companyId]);
 
+  useEffect(() => {
+    const q = query(collection(db, 'invitations'), where('companyId', '==', userProfile.companyId), where('status', '==', 'pending'));
+    return onSnapshot(q, (snap) => {
+      setInvitations(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    });
+  }, [userProfile.companyId]);
+
   const saveSettings = async () => {
     setIsSaving(true);
     try {
@@ -5641,6 +5937,12 @@ function SettingsView({
       if (localCompany) {
         await updateDoc(doc(db, 'companies', userProfile.companyId), {
           name: localCompany.name,
+          tradeName: localCompany.tradeName || '',
+          address: localCompany.address || '',
+          taxId: localCompany.taxId || '',
+          phone: localCompany.phone || '',
+          email: localCompany.email || '',
+          logoUrl: localCompany.logoUrl || '',
           updatedAt: new Date().toISOString()
         });
         setCompany(localCompany);
@@ -5659,14 +5961,40 @@ function SettingsView({
     e.preventDefault();
     if (!newEmail.trim()) return;
     
+    setIsSaving(true);
     try {
-      // In a real app, this would be a backend call to invite.
-      // For now, we'll just show a message.
-      toast.info("Funcionalidad de invitación: En un entorno real, esto enviaría un correo. Por ahora, el usuario debe registrarse con este email para unirse.");
+      const token = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+      const expiresAt = new Date();
+      expiresAt.setDate(expiresAt.getDate() + 7); // 7 days expiry
+
+      const invitationData = {
+        email: newEmail.trim().toLowerCase(),
+        companyId: userProfile.companyId,
+        role: newRole,
+        token,
+        status: 'pending',
+        invitedBy: userProfile.email,
+        createdAt: new Date().toISOString(),
+        expiresAt: expiresAt.toISOString()
+      };
+
+      await addDoc(collection(db, 'invitations'), invitationData);
+      
+      const inviteUrl = `${window.location.origin}?invite=${token}`;
+      
+      toast.success(`Invitación generada para ${newEmail}`);
+      
+      // Copy to clipboard automatically or show a modal
+      navigator.clipboard.writeText(inviteUrl);
+      toast.info("Link de invitación copiado al portapapeles. Envíalo al usuario para que se una.");
+      
       setIsAddingUser(false);
       setNewEmail('');
     } catch (err) {
       console.error("Error adding user:", err);
+      toast.error("Error al generar la invitación");
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -5737,15 +6065,90 @@ function SettingsView({
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div className="space-y-2">
-              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Nombre de la Empresa / Mentoría</label>
+              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Razón Social / Nombre Legal</label>
               <input 
                 type="text" 
-                value={localCompany?.name || ''}
+                value={localCompany?.name || ''} 
                 onChange={(e) => updateCompanyField('name', e.target.value)}
                 className="w-full px-4 py-3 bg-white dark:bg-slate-800 border border-slate-100 dark:border-slate-700 rounded-xl text-sm font-bold text-primary dark:text-white shadow-sm focus:outline-none focus:ring-2 focus:ring-primary/10"
+                placeholder="Ej: Bold Makers Studio S.R.L."
               />
             </div>
+
             <div className="space-y-2">
+              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Nombre Fantasía</label>
+              <input 
+                type="text" 
+                value={localCompany?.tradeName || ''} 
+                onChange={(e) => updateCompanyField('tradeName', e.target.value)}
+                className="w-full px-4 py-3 bg-white dark:bg-slate-800 border border-slate-100 dark:border-slate-700 rounded-xl text-sm font-bold text-primary dark:text-white shadow-sm focus:outline-none focus:ring-2 focus:ring-primary/10"
+                placeholder="Ej: Bold Makers"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Identificación Fiscal (CUIT/DNI)</label>
+              <input 
+                type="text" 
+                value={localCompany?.taxId || ''} 
+                onChange={(e) => updateCompanyField('taxId', e.target.value)}
+                className="w-full px-4 py-3 bg-white dark:bg-slate-800 border border-slate-100 dark:border-slate-700 rounded-xl text-sm font-bold text-primary dark:text-white shadow-sm focus:outline-none focus:ring-2 focus:ring-primary/10"
+                placeholder="Ej: 30-12345678-9"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Dirección</label>
+              <input 
+                type="text" 
+                value={localCompany?.address || ''} 
+                onChange={(e) => updateCompanyField('address', e.target.value)}
+                className="w-full px-4 py-3 bg-white dark:bg-slate-800 border border-slate-100 dark:border-slate-700 rounded-xl text-sm font-bold text-primary dark:text-white shadow-sm focus:outline-none focus:ring-2 focus:ring-primary/10"
+                placeholder="Ej: Av. del Libertador 1234, CABA"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Teléfono de Contacto</label>
+              <input 
+                type="text" 
+                value={localCompany?.phone || ''} 
+                onChange={(e) => updateCompanyField('phone', e.target.value)}
+                className="w-full px-4 py-3 bg-white dark:bg-slate-800 border border-slate-100 dark:border-slate-700 rounded-xl text-sm font-bold text-primary dark:text-white shadow-sm focus:outline-none focus:ring-2 focus:ring-primary/10"
+                placeholder="Ej: +54 9 11 1234-5678"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Email de la Empresa</label>
+              <input 
+                type="email" 
+                value={localCompany?.email || ''} 
+                onChange={(e) => updateCompanyField('email', e.target.value)}
+                className="w-full px-4 py-3 bg-white dark:bg-slate-800 border border-slate-100 dark:border-slate-700 rounded-xl text-sm font-bold text-primary dark:text-white shadow-sm focus:outline-none focus:ring-2 focus:ring-primary/10"
+                placeholder="Ej: contacto@boldmakers.com"
+              />
+            </div>
+
+            <div className="space-y-2 md:col-span-2">
+              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">URL del Logo (Opcional)</label>
+              <div className="flex gap-4 items-center">
+                <input 
+                  type="text" 
+                  value={localCompany?.logoUrl || ''} 
+                  onChange={(e) => updateCompanyField('logoUrl', e.target.value)}
+                  className="flex-1 px-4 py-3 bg-white dark:bg-slate-800 border border-slate-100 dark:border-slate-700 rounded-xl text-sm font-bold text-primary dark:text-white shadow-sm focus:outline-none focus:ring-2 focus:ring-primary/10"
+                  placeholder="https://ejemplo.com/logo.png"
+                />
+                {localCompany?.logoUrl && (
+                  <div className="w-12 h-12 rounded-xl bg-white dark:bg-slate-800 border border-primary/10 overflow-hidden flex items-center justify-center">
+                    <img src={localCompany.logoUrl} alt="Logo Preview" className="max-w-full max-h-full object-contain" referrerPolicy="no-referrer" />
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="space-y-2 md:col-span-2">
               <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">ID de Empresa (No editable)</label>
               <input 
                 type="text" 
@@ -5801,6 +6204,63 @@ function SettingsView({
               </div>
             ))}
           </div>
+
+          {invitations.length > 0 && (
+            <div className="mt-8 space-y-4">
+              <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Invitaciones Pendientes</h4>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                {invitations.map((inv) => (
+                  <div key={inv.id} className="p-4 bg-secondary/5 border border-secondary/10 rounded-2xl flex items-center justify-between group">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 bg-secondary/10 rounded-full flex items-center justify-center">
+                        <Clock className="w-5 h-5 text-secondary" />
+                      </div>
+                      <div>
+                        <p className="text-xs font-bold text-primary dark:text-white truncate max-w-[120px]">{inv.email}</p>
+                        <p className="text-[9px] font-black uppercase tracking-widest text-secondary/60">Pendiente ({inv.role})</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <button 
+                        onClick={() => {
+                          const inviteUrl = `${window.location.origin}?invite=${inv.token}`;
+                          const subject = encodeURIComponent(`Invitación a unirse a ${company?.name || 'nuestro equipo'}`);
+                          const body = encodeURIComponent(`Hola!\n\nTe han invitado a unirte al equipo de ${company?.name || 'nuestra empresa'} en Bold Makers.\n\nPara aceptar la invitación y unirte, haz clic en el siguiente enlace e inicia sesión:\n\n${inviteUrl}\n\n¡Te esperamos!`);
+                          window.open(`mailto:${inv.email}?subject=${subject}&body=${body}`);
+                        }}
+                        className="p-1.5 text-slate-400 hover:text-secondary transition-colors"
+                        title="Enviar por Email"
+                      >
+                        <FileText className="w-4 h-4" />
+                      </button>
+                      <button 
+                        onClick={() => {
+                          const inviteUrl = `${window.location.origin}?invite=${inv.token}`;
+                          navigator.clipboard.writeText(inviteUrl);
+                          toast.success("Link de invitación copiado");
+                        }}
+                        className="p-1.5 text-slate-400 hover:text-primary transition-colors"
+                        title="Copiar Link"
+                      >
+                        <Download className="w-4 h-4" />
+                      </button>
+                      <button 
+                        onClick={async () => {
+                          if (confirm('¿Estás seguro de cancelar esta invitación?')) {
+                            await deleteDoc(doc(db, 'invitations', inv.id));
+                          }
+                        }}
+                        className="p-1.5 text-slate-400 hover:text-red-600 transition-colors"
+                        title="Cancelar Invitación"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </Card>
 
         {/* General Settings */}

@@ -117,3 +117,15 @@ export interface Commission {
   paidAt?: string;
   createdAt: string;
 }
+
+export interface Invitation {
+  id?: string;
+  email: string;
+  companyId: string;
+  role: 'admin' | 'editor' | 'viewer';
+  token: string;
+  status: 'pending' | 'accepted' | 'expired';
+  invitedBy: string;
+  createdAt: string;
+  expiresAt: string;
+}
