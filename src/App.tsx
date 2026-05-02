@@ -66,7 +66,11 @@ import {
   Target,
   ArrowRight,
   Globe,
-  Award
+  Award,
+  LayoutList,
+  Table2,
+  Maximize2,
+  Minimize2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
@@ -116,17 +120,43 @@ function cn(...inputs: ClassValue[]) {
 }
 
 function ContextualSearch({ value, onChange, placeholder }: { value: string; onChange: (v: string) => void; placeholder?: string }) {
+  const [localValue, setLocalValue] = useState(value);
+
+  // Sync with external value changes but don't force re-render on every local change
+  useEffect(() => {
+    if (value !== localValue) {
+      setLocalValue(value);
+    }
+  }, [value]);
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      onChange(localValue);
+    }
+  };
+
+  const handleCommit = () => {
+    onChange(localValue);
+  };
+
   return (
     <div className="flex items-center gap-4 bg-white dark:bg-slate-800 p-4 rounded-[24px] border border-primary/5 dark:border-slate-700 shadow-sm mb-8">
-      <Search className="w-5 h-5 text-secondary" />
+      <Search 
+        className="w-5 h-5 text-secondary cursor-pointer hover:text-primary transition-colors shrink-0" 
+        onClick={handleCommit}
+      />
       <input 
         type="text" 
-        placeholder={placeholder || "Buscar..."} 
+        placeholder={placeholder || "Buscar (Presiona Enter)..."} 
         className="flex-1 outline-none text-sm font-bold text-primary dark:text-white bg-transparent placeholder:text-primary/30 dark:placeholder:text-slate-500"
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
+        value={localValue}
+        onChange={(e) => setLocalValue(e.target.value)}
+        onKeyDown={handleKeyDown}
       />
-      <Filter className="w-5 h-5 text-primary/40" />
+      <Filter className="w-5 h-5 text-primary/40 shrink-0" />
+      {localValue !== value && (
+        <span className="text-[8px] font-black text-secondary animate-pulse uppercase tracking-widest whitespace-nowrap hidden sm:block">Enter para buscar</span>
+      )}
     </div>
   );
 }
@@ -368,125 +398,6 @@ function CompanySetup({ user, onComplete }: { user: User; onComplete: (profile: 
           </Button>
         </form>
       </Card>
-    </div>
-  );
-}
-
-function TeamManagement({ userProfile }: { userProfile: any }) {
-  const [users, setUsers] = useState<any[]>([]);
-  const [isAdding, setIsAdding] = useState(false);
-  const [newEmail, setNewEmail] = useState('');
-  const [newRole, setNewRole] = useState<'admin' | 'editor' | 'viewer'>('viewer');
-  const [loading, setLoading] = useState(false);
-
-  useEffect(() => {
-    const q = query(collection(db, 'users'), where('companyId', '==', userProfile.companyId));
-    return onSnapshot(q, (snap) => {
-      setUsers(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-    });
-  }, [userProfile.companyId]);
-
-  const handleAddUser = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newEmail.trim()) return;
-    setLoading(true);
-
-    try {
-      // In a real app, we would send an invite. 
-      // For this demo, we'll just pre-create the user profile.
-      // Note: This requires the user to log in with this exact email later.
-      
-      // We need a way to find the UID if they already exist, or just wait for them to join.
-      // For simplicity in this environment, we'll assume we can't easily invite by email without a backend.
-      // But the user asked to "invite new users".
-      
-      toast.info("Funcionalidad de invitación: En un entorno real, esto enviaría un correo. Por ahora, el usuario debe registrarse con este email para unirse.");
-      
-      // We'll just show a message for now as we can't create Auth users from client side.
-      setIsAdding(false);
-      setNewEmail('');
-    } catch (err) {
-      console.error("Error adding user:", err);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-2xl font-bold text-primary dark:text-white">Gestión de Equipo</h2>
-          <p className="text-primary/60 dark:text-slate-400">Administra los roles y accesos de tu empresa.</p>
-        </div>
-        {userProfile.role === 'admin' && (
-          <Button onClick={() => setIsAdding(true)}>
-            <Plus className="w-5 h-5" />
-            Invitar Usuario
-          </Button>
-        )}
-      </div>
-
-      <div className="grid gap-4">
-        {users.map((u) => (
-          <Card key={u.uid} className="flex items-center justify-between p-4">
-            <div className="flex items-center gap-4">
-              <div className="w-10 h-10 bg-primary/5 rounded-full flex items-center justify-center">
-                <Users className="w-5 h-5 text-primary" />
-              </div>
-              <div>
-                <p className="font-bold text-primary dark:text-white">{u.email}</p>
-                <p className="text-xs text-primary/40 dark:text-slate-500 uppercase tracking-wider">{u.role}</p>
-              </div>
-            </div>
-            {userProfile.role === 'admin' && u.uid !== userProfile.uid && (
-              <Button variant="ghost" className="text-red-500 hover:bg-red-50" onClick={async () => {
-                if (confirm('¿Estás seguro de eliminar a este usuario?')) {
-                  await deleteDoc(doc(db, 'users', u.uid));
-                }
-              }}>
-                <Trash2 className="w-5 h-5" />
-              </Button>
-            )}
-          </Card>
-        ))}
-      </div>
-
-      {isAdding && (
-        <div className="fixed inset-0 bg-primary/20 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <Card className="max-w-md w-full p-8 space-y-6">
-            <div className="flex items-center justify-between">
-              <h3 className="text-xl font-bold text-primary dark:text-white">Invitar Usuario</h3>
-              <Button variant="ghost" onClick={() => setIsAdding(false)}>
-                <X className="w-5 h-5" />
-              </Button>
-            </div>
-            <form onSubmit={handleAddUser} className="space-y-4">
-              <Input 
-                label="Email del Usuario" 
-                type="email" 
-                placeholder="usuario@ejemplo.com"
-                value={newEmail}
-                onChange={(e) => setNewEmail(e.target.value)}
-                required
-              />
-              <Select 
-                label="Rol"
-                value={newRole}
-                onChange={(e) => setNewRole(e.target.value as any)}
-                options={[
-                  { value: 'admin', label: 'Administrador' },
-                  { value: 'editor', label: 'Editor' },
-                  { value: 'viewer', label: 'Visualizador' }
-                ]}
-              />
-              <Button type="submit" className="w-full py-4" disabled={loading}>
-                {loading ? <RefreshCw className="w-5 h-5 animate-spin" /> : "Enviar Invitación"}
-              </Button>
-            </form>
-          </Card>
-        </div>
-      )}
     </div>
   );
 }
@@ -941,7 +852,7 @@ export default function App() {
 
   return (
     <SettingsContext.Provider value={settings}>
-      <Toaster position="top-right" richColors />
+      <Toaster position="bottom-left" richColors />
       <div className="h-screen bg-slate-50 dark:bg-slate-950 transition-colors duration-500 flex flex-col md:flex-row overflow-hidden">
       {/* Mobile Header */}
       <div className="md:hidden bg-white dark:bg-slate-900 border-b border-slate-100 dark:border-slate-800 p-4 flex items-center justify-between sticky top-0 z-30">
@@ -2370,6 +2281,7 @@ function ClientsView({
     clientData.closerCommissionPct = isNaN(cComm) ? settings.defaultCloserCommissionPct : cComm;
 
     try {
+      setIsAdding(false);
       const docRef = await addDoc(collection(db, 'clients'), {
         ...clientData,
         companyId: userProfile.companyId
@@ -2462,7 +2374,6 @@ function ClientsView({
         }
       }
 
-      setIsAdding(false);
       toast.success('Cliente agregado correctamente', {
         action: {
           label: 'Confirmar Pago',
@@ -2519,8 +2430,8 @@ function ClientsView({
     }
 
     try {
-      await updateDoc(doc(db, 'clients', editingClient.id), updatedData);
       setEditingClient(null);
+      await updateDoc(doc(db, 'clients', editingClient.id), updatedData);
       toast.success('Cliente actualizado correctamente');
     } catch (err) {
       console.error("Error updating client:", err);
@@ -3443,6 +3354,7 @@ function PaymentsView({
     const isAutomaticReceipt = ['Mercury', 'Stripe'].includes(paymentMethod);
 
     try {
+      setIsPaying(null);
       const currentPaid = isPaying.paidAmountUSD || 0;
       const newPaid = currentPaid + amountUSD;
       const isFullyPaid = newPaid >= isPaying.amountUSD;
@@ -3491,7 +3403,6 @@ function PaymentsView({
       // Generate commissions
       await generateCommissions(amountUSD, isPaying.clientId, isPaying.id!, format(new Date(), 'yyyy-MM-dd'));
 
-      setIsPaying(null);
       toast.success('Pago procesado correctamente', {
         action: {
           label: 'Emitir Factura',
@@ -4517,6 +4428,423 @@ function ReportsView({
   );
 }
 
+// --- Accounting Spreadsheet View ---
+
+function AccountingSpreadsheetView({ 
+  cashflow,
+  onUpdateEntry,
+  userProfile 
+}: { 
+  cashflow: CashflowEntry[];
+  onUpdateEntry: (id: string, updates: any, silent?: boolean) => Promise<void>;
+  userProfile: any;
+}) {
+  const formatCurrency = useCurrency();
+  const [editingCell, setEditingCell] = useState<{ id: string; field: string } | null>(null);
+  const [editingDetail, setEditingDetail] = useState<string | null>(null);
+  const [sheetSearchTerm, setSheetSearchTerm] = useState('');
+  const [localSearch, setLocalSearch] = useState('');
+  const [selectedCategory, setSelectedCategory] = useState<string>('all');
+  const [isFullScreen, setIsFullScreen] = useState(false);
+  
+  // Define columns: Wide range around current date
+  const months = useMemo(() => {
+    const now = new Date();
+    const result = [];
+    // 6 months back, 12 months forward to match the user screenshot's breadth
+    for (let i = -6; i <= 12; i++) {
+      result.push(addMonths(startOfMonth(now), i));
+    }
+    return result;
+  }, []);
+
+  // Logical grouping for rows
+  const rows = useMemo(() => {
+    const incomeRows: { [key: string]: { [month: string]: CashflowEntry[] } } = {};
+    const expenseRows: { [key: string]: { [month: string]: CashflowEntry[] } } = {};
+
+    cashflow.forEach(entry => {
+      // Category Filter
+      if (selectedCategory !== 'all' && entry.category !== selectedCategory) return;
+
+      const monthKey = format(parseISO(entry.date), 'yyyy-MM');
+      const target = entry.type === 'income' ? incomeRows : expenseRows;
+      
+      // Clean up description for better grouping
+      let key = entry.description || entry.category || 'Sin descripción';
+      if (entry.type === 'income' && key.includes(' - ')) {
+        const parts = key.split(' - ');
+        key = parts[1] || parts[0];
+      }
+
+      // Local search filter (only if committed)
+      if (localSearch && !key.toLowerCase().includes(localSearch.toLowerCase())) {
+        return;
+      }
+      
+      if (!target[key]) target[key] = {};
+      if (!target[key][monthKey]) target[key][monthKey] = [];
+      target[key][monthKey].push(entry);
+    });
+
+    return { 
+      income: Object.keys(incomeRows).sort().reduce((obj: any, key) => { obj[key] = incomeRows[key]; return obj; }, {}), 
+      expense: Object.keys(expenseRows).sort().reduce((obj: any, key) => { obj[key] = expenseRows[key]; return obj; }, {})
+    };
+  }, [cashflow, localSearch, selectedCategory]);
+
+  const categories = useMemo(() => {
+    const cats = new Set(cashflow.map(e => e.category));
+    return ['all', ...Array.from(cats)].sort();
+  }, [cashflow]);
+
+  const handleCellBlur = async (entryId: string, value: string) => {
+    const newAmount = parseFloat(value);
+    if (!isNaN(newAmount)) {
+      await onUpdateEntry(entryId, { amountUSD: newAmount });
+    }
+    setEditingCell(null);
+  };
+
+  const handleDetailUpdate = async (oldDetail: string, newDetail: string) => {
+    if (!newDetail || oldDetail === newDetail) {
+      setEditingDetail(null);
+      return;
+    }
+
+    const entriesToUpdate = cashflow.filter(e => {
+      let key = e.description || e.category || 'Sin descripción';
+      if (e.type === 'income' && key.includes(' - ')) {
+        const parts = key.split(' - ');
+        key = parts[1] || parts[0];
+      }
+      return key === oldDetail;
+    });
+
+    try {
+      await Promise.all(entriesToUpdate.map(e => onUpdateEntry(e.id!, { description: newDetail }, true)));
+      toast.success('Detalle actualizado en todas las entradas');
+    } catch (err) {
+      toast.error('Error al actualizar detalles');
+    }
+    setEditingDetail(null);
+  };
+
+  const getCellContent = (entries: CashflowEntry[]) => {
+    if (!entries || entries.length === 0) return (
+      <div className="text-slate-300 dark:text-slate-700 text-center font-normal">-</div>
+    );
+    
+    const total = entries.reduce((sum, e) => sum + e.amountUSD, 0);
+    const entry = entries[0];
+
+    if (editingCell?.id === entry.id) {
+      return (
+        <input
+          autoFocus
+          type="number"
+          defaultValue={entry.amountUSD}
+          onBlur={(e) => handleCellBlur(entry.id!, e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') handleCellBlur(entry.id!, e.currentTarget.value);
+            if (e.key === 'Escape') setEditingCell(null);
+          }}
+          className="w-full bg-white dark:bg-slate-700 border border-primary text-[11px] font-black focus:outline-none text-right px-1"
+        />
+      );
+    }
+
+    return (
+      <div 
+        onClick={() => setEditingCell({ id: entry.id!, field: 'amount' })}
+        className={cn(
+          "cursor-pointer hover:bg-primary/10 px-2 py-0.5 rounded transition-all text-right font-bold tracking-tighter tabular-nums",
+          entry.type === 'income' ? "text-green-600 dark:text-green-500" : "text-red-600 dark:text-red-500"
+        )}
+      >
+        {Math.round(total)}
+      </div>
+    );
+  };
+
+  const totalsPerMonth = useMemo(() => {
+    const result: { [month: string]: { income: number; expense: number } } = {};
+    months.forEach(m => {
+      const key = format(m, 'yyyy-MM');
+      result[key] = { income: 0, expense: 0 };
+    });
+
+    cashflow.forEach(entry => {
+      const monthKey = format(parseISO(entry.date), 'yyyy-MM');
+      if (result[monthKey]) {
+        if (entry.type === 'income') result[monthKey].income += entry.amountUSD;
+        else result[monthKey].expense += entry.amountUSD;
+      }
+    });
+
+    return result;
+  }, [cashflow, months]);
+
+  const TableHeader = () => (
+    <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 p-4 border-b border-slate-100 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-900/80 backdrop-blur-sm sticky top-0 z-[50]">
+      <div className="flex items-center gap-3">
+        <div className="p-2 bg-primary/10 rounded-xl">
+          <FileSpreadsheet className="w-5 h-5 text-primary" />
+        </div>
+        <div>
+          <h3 className="font-black text-primary uppercase italic tracking-tight">Planilla de Cashflow</h3>
+          <p className="text-[10px] text-primary/40 dark:text-slate-500 font-bold uppercase tracking-widest">Control General y Proyecciones</p>
+        </div>
+      </div>
+      
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="flex items-center gap-2 mr-2 border-r border-slate-200 dark:border-slate-800 pr-4">
+          <Filter className="w-3 h-3 text-primary/30" />
+          <select 
+            value={selectedCategory}
+            onChange={(e) => setSelectedCategory(e.target.value)}
+            className="bg-transparent text-[10px] font-black uppercase tracking-widest text-primary focus:outline-none cursor-pointer"
+          >
+            <option value="all">TODAS LAS CATEGORÍAS</option>
+            {categories.filter(c => c !== 'all').map(cat => (
+              <option key={cat} value={cat}>{cat}</option>
+            ))}
+          </select>
+        </div>
+
+        <div className="relative group">
+          <Search 
+            className="absolute left-3 top-1/2 -translate-y-1/2 w-3 h-3 text-primary/30 cursor-pointer hover:text-primary transition-colors z-10" 
+            onClick={() => setLocalSearch(sheetSearchTerm)}
+          />
+          <input 
+            type="text"
+            placeholder="Buscar..."
+            value={sheetSearchTerm}
+            onChange={(e) => setSheetSearchTerm(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                setLocalSearch(sheetSearchTerm);
+                e.currentTarget.blur();
+              }
+            }}
+            className="pl-8 pr-4 py-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs focus:ring-2 focus:ring-primary/20 transition-all w-full md:w-64 font-medium"
+          />
+          {sheetSearchTerm !== localSearch && (
+            <div className="absolute top-full mt-1 left-0 right-0 bg-secondary/10 text-[8px] font-black uppercase tracking-widest text-secondary px-2 py-0.5 rounded-b-lg text-center animate-pulse z-10">
+              Presiona Enter para filtrar
+            </div>
+          )}
+        </div>
+        <button 
+          onClick={() => setIsFullScreen(!isFullScreen)}
+          className="p-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-primary/60 hover:text-primary transition-all shadow-sm"
+          title={isFullScreen ? "Salir de pantalla completa" : "Pantalla completa"}
+        >
+          {isFullScreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
+        </button>
+      </div>
+    </div>
+  );
+
+  const content = (
+    <Card className={cn(
+      "p-0 overflow-hidden border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 flex flex-col",
+      isFullScreen ? "fixed inset-0 z-[60] rounded-none" : "bento-card shadow-2xl"
+    )}>
+      <TableHeader />
+      
+      <div className="overflow-x-auto flex-1 scrollbar-thin scrollbar-thumb-primary/10">
+        <table className="w-full text-[10px] border-collapse min-w-[2000px]">
+          <thead className="sticky top-[73px] z-30">
+            <tr className="bg-slate-100 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800">
+              <th className="px-4 py-3 text-left font-black text-primary/60 dark:text-slate-400 uppercase tracking-tighter border-r border-slate-200 dark:border-slate-800 sticky left-0 bg-slate-100 dark:bg-slate-900 z-40 w-[220px]">Detalle</th>
+              {months.map(m => (
+                <th key={format(m, 'yyyy-MM')} className="px-2 py-3 text-center border-r border-slate-200 dark:border-slate-800 min-w-[100px]">
+                  <div className="flex flex-col">
+                    <span className="font-black text-primary dark:text-slate-200 uppercase">{format(m, 'MMMM', { locale: es })}</span>
+                    <span className="text-[8px] opacity-40 font-bold">{format(m, 'yyyy')}</span>
+                  </div>
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+            {/* EGRESOS TOTALES HEADER */}
+            <tr className="bg-red-500/10 dark:bg-red-950/40 sticky top-[121px] z-20">
+              <td className="px-4 py-2 font-black text-red-600 uppercase tracking-tight sticky left-0 bg-red-100 dark:bg-red-950 z-10 border-r border-red-200 dark:border-red-900">EGRESOS TOTALES</td>
+              {months.map(m => {
+                const key = format(m, 'yyyy-MM');
+                const val = totalsPerMonth[key]?.expense || 0;
+                return (
+                  <td key={key} className="px-2 py-2 text-right font-black text-red-600 bg-red-50/30 dark:bg-red-900/10 border-r border-red-100 dark:border-red-900/30">
+                    {val > 0 ? `-${Math.round(val)}USD` : '-'}
+                  </td>
+                );
+              })}
+            </tr>
+            
+            {Object.keys(rows.expense).map(detail => (
+              <tr key={detail} className="hover:bg-slate-50 dark:hover:bg-slate-900/50 transition-colors group">
+                <td className="px-4 py-2 font-bold text-primary dark:text-slate-300 truncate sticky left-0 bg-white dark:bg-slate-950 z-10 border-r border-slate-100 dark:border-slate-800 shadow-[2px_0_5px_rgba(0,0,0,0.02)]">
+                  {editingDetail === detail ? (
+                    <input 
+                      autoFocus
+                      defaultValue={detail}
+                      onBlur={(e) => handleDetailUpdate(detail, e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') handleDetailUpdate(detail, e.currentTarget.value);
+                        if (e.key === 'Escape') setEditingDetail(null);
+                      }}
+                      className="w-full bg-slate-50 border border-primary/30 rounded px-2 py-1 text-[10px] font-bold focus:outline-none"
+                    />
+                  ) : (
+                    <div 
+                      onClick={() => setEditingDetail(detail)}
+                      className="cursor-pointer hover:text-primary transition-colors flex items-center justify-between"
+                    >
+                      {detail}
+                      <Edit className="w-3 h-3 opacity-0 group-hover:opacity-30 transition-opacity" />
+                    </div>
+                  )}
+                </td>
+                {months.map(m => {
+                  const key = format(m, 'yyyy-MM');
+                  return (
+                    <td key={key} className="px-2 py-2 border-r border-slate-100 dark:border-slate-800 text-right">
+                      {getCellContent(rows.expense[detail][key])}
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+
+            <tr className="h-4 bg-slate-50 dark:bg-slate-900/30">
+              <td className="sticky left-0 bg-slate-50 dark:bg-slate-900/30 border-r border-slate-200 dark:border-slate-800"></td>
+              {months.map(m => <td key={format(m, 'yyyy-MM')} className="border-r border-slate-100 dark:border-slate-800"></td>)}
+            </tr>
+
+            {/* INGRESOS TOTALES HEADER */}
+            <tr className="bg-green-500/10 dark:bg-green-950/40">
+              <td className="px-4 py-2 font-black text-green-600 uppercase tracking-tight sticky left-0 bg-green-100 dark:bg-green-950 z-10 border-r border-green-200 dark:border-green-900">INGRESOS TOTALES</td>
+              {months.map(m => {
+                const key = format(m, 'yyyy-MM');
+                const val = totalsPerMonth[key]?.income || 0;
+                return (
+                  <td key={key} className="px-2 py-2 text-right font-black text-green-600 bg-green-50/30 dark:bg-green-900/10 border-r border-green-100 dark:border-green-900/30">
+                    {val > 0 ? `${Math.round(val)}USD` : '-'}
+                  </td>
+                );
+              })}
+            </tr>
+
+            {Object.keys(rows.income).map(detail => (
+              <tr key={detail} className="hover:bg-slate-50 dark:hover:bg-slate-900/50 transition-colors group">
+                <td className="px-4 py-2 font-bold text-primary dark:text-slate-300 truncate sticky left-0 bg-white dark:bg-slate-950 z-10 border-r border-slate-100 dark:border-slate-800 shadow-[2px_0_5_rgba(0,0,0,0.02)]">
+                  {editingDetail === detail ? (
+                    <input 
+                      autoFocus
+                      defaultValue={detail}
+                      onBlur={(e) => handleDetailUpdate(detail, e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') handleDetailUpdate(detail, e.currentTarget.value);
+                        if (e.key === 'Escape') setEditingDetail(null);
+                      }}
+                      className="w-full bg-slate-50 border border-primary/30 rounded px-2 py-1 text-[10px] font-bold focus:outline-none"
+                    />
+                  ) : (
+                    <div 
+                      onClick={() => setEditingDetail(detail)}
+                      className="cursor-pointer hover:text-primary transition-colors flex items-center justify-between"
+                    >
+                      {detail}
+                      <Edit className="w-3 h-3 opacity-0 group-hover:opacity-30 transition-opacity" />
+                    </div>
+                  )}
+                </td>
+                {months.map(m => {
+                  const key = format(m, 'yyyy-MM');
+                  return (
+                    <td key={key} className="px-2 py-2 border-r border-slate-100 dark:border-slate-800 text-right">
+                      {getCellContent(rows.income[detail][key])}
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+
+            <tr className="h-4 bg-slate-50 dark:bg-slate-900/30">
+              <td className="sticky left-0 bg-slate-50 dark:bg-slate-900/30 border-r border-slate-200 dark:border-slate-800"></td>
+              {months.map(m => <td key={format(m, 'yyyy-MM')} className="border-r border-slate-100 dark:border-slate-800"></td>)}
+            </tr>
+
+            <tr className="bg-primary/5 dark:bg-primary/10">
+              <td className="px-4 py-3 font-black text-primary dark:text-secondary uppercase tracking-tighter sticky left-0 bg-slate-100 dark:bg-slate-900 z-10 border-r border-slate-200 dark:border-slate-800">UTILIDAD MENSUAL</td>
+              {months.map(m => {
+                const key = format(m, 'yyyy-MM');
+                const income = totalsPerMonth[key]?.income || 0;
+                const expense = totalsPerMonth[key]?.expense || 0;
+                const utility = income - expense;
+                return (
+                  <td key={key} className={cn(
+                    "px-2 py-3 text-right font-black italic border-r border-slate-200 dark:border-slate-800",
+                    utility >= 0 ? "text-primary dark:text-secondary" : "text-red-600"
+                  )}>
+                    {Math.round(utility)}USD
+                  </td>
+                );
+              })}
+            </tr>
+            <tr className="bg-secondary/20 dark:bg-secondary/10">
+              <td className="px-4 py-3 font-black text-secondary uppercase sticky left-0 bg-secondary/10 dark:bg-slate-900 z-10 border-r border-slate-200 dark:border-slate-800">PORCENTAJE PROFIT</td>
+              {months.map(m => {
+                const key = format(m, 'yyyy-MM');
+                const income = totalsPerMonth[key]?.income || 0;
+                const expense = totalsPerMonth[key]?.expense || 0;
+                const utility = income - expense;
+                const profit = income > 0 ? (utility / income) * 100 : 0;
+                return (
+                  <td key={key} className={cn(
+                    "px-2 py-3 text-right font-black border-r border-slate-200 dark:border-slate-800",
+                    profit >= 0 ? "text-secondary" : "text-red-500 text-sm"
+                  )}>
+                    {income > 0 ? `${profit.toFixed(0)}%` : '-'}
+                  </td>
+                );
+              })}
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      
+      {!isFullScreen && (
+        <div className="p-4 bg-slate-50 dark:bg-slate-900 text-[10px] text-primary/40 dark:text-slate-500 font-bold italic flex items-center justify-between border-t border-slate-100 dark:border-slate-800">
+          <div className="flex items-center gap-2">
+            <AlertCircle className="w-3 h-3" />
+            Haz clic en cualquier celda para editar. Los cambios se guardan automáticamente.
+          </div>
+          <div className="flex items-center gap-4">
+            <span className="flex items-center gap-1"><span className="w-2 h-2 bg-green-500 rounded-full"></span> INGRESOS</span>
+            <span className="flex items-center gap-1"><span className="w-2 h-2 bg-red-500 rounded-full"></span> EGRESOS</span>
+          </div>
+        </div>
+      )}
+    </Card>
+  );
+
+  return isFullScreen ? (
+    <div className="fixed inset-0 z-[60] bg-slate-950/50 backdrop-blur-sm flex items-center justify-center overflow-hidden">
+      <motion.div 
+        initial={{ opacity: 0, scale: 0.95 }}
+        animate={{ opacity: 1, scale: 1 }}
+        className="w-full h-full p-4 md:p-8"
+      >
+        {content}
+      </motion.div>
+    </div>
+  ) : content;
+}
+
 // --- Cashflow View ---
 
 function CashflowView({ 
@@ -4552,6 +4880,7 @@ function CashflowView({
   const [filterType, setFilterType] = useState<'all' | 'income' | 'expense'>('all');
   const [timeFilter, setTimeFilter] = useState<'all' | 'week' | 'month' | 'quarter' | 'year'>('all');
   const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc' }>({ key: 'date', direction: 'desc' });
+  const [viewMode, setViewMode] = useState<'list' | 'accounting'>('list');
 
   const handleSort = (key: string) => {
     setSortConfig(prev => ({
@@ -4611,6 +4940,16 @@ function CashflowView({
     });
   }, [cashflow, filterType, timeFilter, sortConfig]);
 
+  const handleUpdateAmount = async (id: string, updates: any, silent = false) => {
+    try {
+      await updateDoc(doc(db, 'cashflow', id), updates);
+      if (!silent) toast.success('Actualizado');
+    } catch (err) {
+      console.error("Error updating entry:", err);
+      if (!silent) toast.error('Error al actualizar');
+    }
+  };
+
   const totals = useMemo(() => {
     return filteredCashflow.reduce((acc, entry) => {
       if (entry.type === 'income') acc.income += entry.amountUSD;
@@ -4631,6 +4970,7 @@ function CashflowView({
     const date = formData.get('date') as string;
     
     try {
+      setIsAdding(false);
       const cashflowRef = await addDoc(collection(db, 'cashflow'), {
         companyId: userProfile.companyId,
         type,
@@ -4668,7 +5008,6 @@ function CashflowView({
         }
       }
 
-      setIsAdding(false);
       setSelectedClientId('');
       setSelectedPaymentId('');
       toast.success('Entrada agregada correctamente');
@@ -4687,6 +5026,7 @@ function CashflowView({
     const paymentId = editingEntry.paymentId;
     
     try {
+      setEditingEntry(null);
       // If it's an income linked to a payment, update the payment
       if (type === 'income' && paymentId) {
         const payment = payments.find(p => p.id === paymentId);
@@ -4713,7 +5053,6 @@ function CashflowView({
         paymentMethod: formData.get('paymentMethod') as PaymentMethod,
       });
 
-      setEditingEntry(null);
       toast.success('Entrada actualizada correctamente');
     } catch (err) {
       console.error("Error updating cashflow entry:", err);
@@ -4751,9 +5090,34 @@ function CashflowView({
 
   return (
     <div className="space-y-8">
-      <ContextualSearch value={searchTerm} onChange={setSearchTerm} placeholder="Buscar transacciones..." />
+      {viewMode === 'list' && (
+        <ContextualSearch value={searchTerm} onChange={setSearchTerm} placeholder="Buscar transacciones..." />
+      )}
       <div className="flex flex-col lg:flex-row lg:items-center justify-end gap-6">
         <div className="flex flex-wrap items-center gap-4">
+          <div className="flex bg-white dark:bg-slate-800 p-1 rounded-xl border border-slate-100 dark:border-slate-700 shadow-sm">
+            <button 
+              onClick={() => setViewMode('list')}
+              className={cn(
+                "p-2 rounded-lg transition-all",
+                viewMode === 'list' ? "bg-primary text-white shadow-md" : "text-primary/40 hover:text-primary"
+              )}
+              title="Vista de Lista"
+            >
+              <LayoutList className="w-4 h-4" />
+            </button>
+            <button 
+              onClick={() => setViewMode('accounting')}
+              className={cn(
+                "p-2 rounded-lg transition-all",
+                viewMode === 'accounting' ? "bg-primary text-white shadow-md" : "text-primary/40 hover:text-primary"
+              )}
+              title="Vista Contable"
+            >
+              <Table2 className="w-4 h-4" />
+            </button>
+          </div>
+
           <div className="flex bg-white dark:bg-slate-800 p-1 rounded-xl border border-slate-100 dark:border-slate-700 shadow-sm">
             <button 
               onClick={() => setFilterType('all')}
@@ -4840,86 +5204,107 @@ function CashflowView({
         </Card>
       </div>
 
-      <div className="grid grid-cols-1 gap-4">
-        {filteredCashflow.map(entry => (
-          <Card key={entry.id} className="p-4 md:p-6 bento-card flex flex-col sm:flex-row sm:items-center justify-between gap-4 md:gap-6 group">
-            <div className="flex items-center gap-4 md:gap-6">
-              <div className={cn(
-                "w-12 h-12 md:w-14 md:h-14 rounded-[18px] flex items-center justify-center transition-transform duration-300 group-hover:scale-110 shrink-0",
-                entry.type === 'income' 
-                  ? "bg-green-100 text-green-700 dark:bg-green-900/20 dark:text-green-400" 
-                  : "bg-red-100 text-red-700 dark:bg-red-900/20 dark:text-red-400"
-              )}>
-                {entry.type === 'income' ? <ArrowUpRight className="w-5 h-5 md:w-6 md:h-6" /> : <ArrowDownRight className="w-5 h-5 md:w-6 md:h-6" />}
+      {viewMode === 'list' ? (
+        <div className="grid grid-cols-1 gap-4">
+          {filteredCashflow.map(entry => (
+            <Card key={entry.id} className="p-4 md:p-6 bento-card flex flex-col sm:flex-row sm:items-center justify-between gap-4 md:gap-6 group">
+              <div className="flex items-center gap-4 md:gap-6">
+                <div className={cn(
+                  "w-12 h-12 md:w-14 md:h-14 rounded-[18px] flex items-center justify-center transition-transform duration-300 group-hover:scale-110 shrink-0",
+                  entry.type === 'income' 
+                    ? "bg-green-100 text-green-700 dark:bg-green-900/20 dark:text-green-400" 
+                    : "bg-red-100 text-red-700 dark:bg-red-900/20 dark:text-red-400"
+                )}>
+                  {entry.type === 'income' ? <ArrowUpRight className="w-5 h-5 md:w-6 md:h-6" /> : <ArrowDownRight className="w-5 h-5 md:w-6 md:h-6" />}
+                </div>
+                <div className="min-w-0">
+                  <p className="font-black text-primary text-base md:text-lg tracking-tight truncate">{entry.description}</p>
+                  <div className="flex flex-wrap items-center gap-2 md:gap-3 mt-1">
+                    <span className="text-[10px] md:text-xs font-bold text-primary/40 dark:text-slate-500">{format(parseISO(entry.date), 'dd/MM/yyyy')}</span>
+                    <span className="hidden sm:block w-1 h-1 bg-primary/10 dark:bg-slate-700 rounded-full"></span>
+                    <span className="text-[9px] md:text-[10px] font-black uppercase tracking-widest text-primary/40 dark:text-slate-500 bg-primary/5 dark:bg-slate-800 px-2 py-0.5 rounded-full">{entry.category}</span>
+                    {entry.paymentMethod && (
+                      <>
+                        <span className="hidden sm:block w-1 h-1 bg-primary/10 dark:bg-slate-700 rounded-full"></span>
+                        <span className="text-[9px] md:text-[10px] font-black uppercase tracking-widest text-secondary">{entry.paymentMethod}</span>
+                      </>
+                    )}
+                  </div>
+                </div>
               </div>
-              <div className="min-w-0">
-                <p className="font-black text-primary text-base md:text-lg tracking-tight truncate">{entry.description}</p>
-                <div className="flex flex-wrap items-center gap-2 md:gap-3 mt-1">
-                  <span className="text-[10px] md:text-xs font-bold text-primary/40 dark:text-slate-500">{format(parseISO(entry.date), 'dd/MM/yyyy')}</span>
-                  <span className="hidden sm:block w-1 h-1 bg-primary/10 dark:bg-slate-700 rounded-full"></span>
-                  <span className="text-[9px] md:text-[10px] font-black uppercase tracking-widest text-primary/40 dark:text-slate-500 bg-primary/5 dark:bg-slate-800 px-2 py-0.5 rounded-full">{entry.category}</span>
-                  {entry.paymentMethod && (
-                    <>
-                      <span className="hidden sm:block w-1 h-1 bg-primary/10 dark:bg-slate-700 rounded-full"></span>
-                      <span className="text-[9px] md:text-[10px] font-black uppercase tracking-widest text-secondary">{entry.paymentMethod}</span>
-                    </>
+              <div className="flex items-center justify-between sm:justify-end gap-4 border-t sm:border-t-0 pt-3 sm:pt-0 border-primary/5">
+                <p className={cn(
+                  "text-xl md:text-2xl font-black tracking-tighter italic",
+                  entry.type === 'income' ? "text-green-600" : "text-red-600"
+                )}>
+                  {entry.type === 'income' ? '+' : '-'}{formatCurrency(entry.amountUSD)}
+                </p>
+                <div className="flex items-center gap-1 sm:opacity-0 group-hover:opacity-100 transition-opacity">
+                  <button 
+                    onClick={() => setEditingEntry(entry)} 
+                    className="text-primary/20 dark:text-slate-600 hover:text-primary dark:hover:text-slate-200 transition-colors p-2"
+                  >
+                    <Edit className="w-4 h-4" />
+                  </button>
+                  {isDeletingId === entry.id ? (
+                    <div className="flex items-center gap-1 bg-red-50 dark:bg-red-900/20 p-1 rounded-lg">
+                      <button 
+                        onClick={() => entry.id && handleDeleteEntry(entry.id)} 
+                        className="text-red-600 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-900/40 p-1 rounded transition-colors"
+                      >
+                        <Check className="w-4 h-4" />
+                      </button>
+                      <button 
+                        onClick={() => setIsDeletingId(null)} 
+                        className="text-primary/40 dark:text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 p-1 rounded transition-colors"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+                  ) : (
+                    <button 
+                      onClick={() => entry.id && setIsDeletingId(entry.id)} 
+                      className="text-primary/20 dark:text-slate-600 hover:text-red-600 dark:hover:text-red-400 transition-colors p-2"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
                   )}
                 </div>
               </div>
-            </div>
-            <div className="flex items-center justify-between sm:justify-end gap-4 border-t sm:border-t-0 pt-3 sm:pt-0 border-primary/5">
-              <p className={cn(
-                "text-xl md:text-2xl font-black tracking-tighter italic",
-                entry.type === 'income' ? "text-green-600" : "text-red-600"
-              )}>
-                {entry.type === 'income' ? '+' : '-'}{formatCurrency(entry.amountUSD)}
-              </p>
-              <div className="flex items-center gap-1 sm:opacity-0 group-hover:opacity-100 transition-opacity">
-                <button 
-                  onClick={() => setEditingEntry(entry)} 
-                  className="text-primary/20 dark:text-slate-600 hover:text-primary dark:hover:text-slate-200 transition-colors p-2"
-                >
-                  <Edit className="w-4 h-4" />
-                </button>
-                {isDeletingId === entry.id ? (
-                  <div className="flex items-center gap-1 bg-red-50 dark:bg-red-900/20 p-1 rounded-lg">
-                    <button 
-                      onClick={() => entry.id && handleDeleteEntry(entry.id)} 
-                      className="text-red-600 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-900/40 p-1 rounded transition-colors"
-                    >
-                      <Check className="w-4 h-4" />
-                    </button>
-                    <button 
-                      onClick={() => setIsDeletingId(null)} 
-                      className="text-primary/40 dark:text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 p-1 rounded transition-colors"
-                    >
-                      <X className="w-4 h-4" />
-                    </button>
-                  </div>
-                ) : (
-                  <button 
-                    onClick={() => entry.id && setIsDeletingId(entry.id)} 
-                    className="text-primary/20 dark:text-slate-600 hover:text-red-600 dark:hover:text-red-400 transition-colors p-2"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
-                )}
-              </div>
-            </div>
-          </Card>
-        ))}
-      </div>
+            </Card>
+          ))}
+        </div>
+      ) : (
+        <AccountingSpreadsheetView 
+          cashflow={cashflow}
+          onUpdateEntry={handleUpdateAmount}
+          userProfile={userProfile}
+        />
+      )}
 
       {isAdding && (
-        <div className="fixed inset-0 bg-primary/40 backdrop-blur-md flex items-center justify-center p-4 z-50">
-          <Card className="max-w-md w-full p-10 bento-card">
-            <div className="flex items-center justify-between mb-8">
-              <h3 className="text-2xl font-black text-primary uppercase italic tracking-tight">Nueva <span className="text-secondary">Entrada</span></h3>
+        <div className={cn(
+          "fixed inset-0 backdrop-blur-md flex items-center justify-center p-4 z-50 transition-colors duration-500",
+          entryType === 'income' ? "bg-green-900/20" : "bg-red-900/20"
+        )}>
+          <Card className={cn(
+            "max-w-md w-full p-10 bento-card relative overflow-hidden border-t-8",
+            entryType === 'income' ? "border-t-green-500" : "border-t-red-500"
+          )}>
+            <div className="absolute -top-6 -right-6 opacity-[0.05] pointer-events-none">
+              {entryType === 'income' ? <ArrowUpRight className="w-32 h-32" /> : <ArrowDownRight className="w-32 h-32" />}
+            </div>
+            <div className="flex items-center justify-between mb-8 relative z-10">
+              <h3 className="text-2xl font-black text-primary uppercase italic tracking-tight">
+                Nueva <span className={cn(entryType === 'income' ? "text-green-600" : "text-red-600")}>
+                  {entryType === 'income' ? 'Entrada' : 'Salida'}
+                </span>
+              </h3>
               <button onClick={() => setIsAdding(false)} className="text-primary/40 hover:text-primary transition-colors">
                 <X className="w-6 h-6" />
               </button>
             </div>
-            <form onSubmit={handleAddEntry} className="space-y-6">
+            <form onSubmit={handleAddEntry} className="space-y-6 relative z-10">
               <Select 
                 label="Tipo" 
                 name="type" 
@@ -5003,15 +5388,28 @@ function CashflowView({
       )}
 
       {editingEntry && (
-        <div className="fixed inset-0 bg-primary/40 backdrop-blur-md flex items-center justify-center p-4 z-50">
-          <Card className="max-w-md w-full p-10">
-            <div className="flex items-center justify-between mb-8">
-              <h3 className="text-2xl font-black text-primary dark:text-secondary uppercase italic tracking-tight">Editar <span className="text-secondary dark:text-tertiary">Entrada</span></h3>
+        <div className={cn(
+          "fixed inset-0 backdrop-blur-md flex items-center justify-center p-4 z-50 transition-colors duration-500",
+          editingEntry.type === 'income' ? "bg-green-900/20" : "bg-red-900/20"
+        )}>
+          <Card className={cn(
+            "max-w-md w-full p-10 bento-card relative overflow-hidden border-t-8",
+            editingEntry.type === 'income' ? "border-t-green-500" : "border-t-red-500"
+          )}>
+            <div className="absolute -top-6 -right-6 opacity-[0.05] pointer-events-none">
+              {editingEntry.type === 'income' ? <ArrowUpRight className="w-32 h-32" /> : <ArrowDownRight className="w-32 h-32" />}
+            </div>
+            <div className="flex items-center justify-between mb-8 relative z-10">
+              <h3 className="text-2xl font-black text-primary dark:text-slate-100 uppercase italic tracking-tight">
+                Editar <span className={cn(editingEntry.type === 'income' ? "text-green-600" : "text-red-600")}>
+                  {editingEntry.type === 'income' ? 'Ingreso' : 'Egreso'}
+                </span>
+              </h3>
               <button onClick={() => setEditingEntry(null)} className="text-primary/40 hover:text-primary dark:hover:text-slate-200 transition-colors">
                 <X className="w-6 h-6" />
               </button>
             </div>
-            <form onSubmit={handleUpdateEntry} className="space-y-6">
+            <form onSubmit={handleUpdateEntry} className="space-y-6 relative z-10">
               <Select 
                 label="Tipo" 
                 name="type" 
@@ -5111,6 +5509,7 @@ function PayrollView({
     const formData = new FormData(e.currentTarget);
     
     try {
+      setIsAddingStaff(false);
       await addDoc(collection(db, 'staff'), {
         companyId: userProfile.companyId,
         name: formData.get('name') as string,
@@ -5120,7 +5519,6 @@ function PayrollView({
         baseSalaryUSD: Number(formData.get('baseSalaryUSD')),
         createdAt: new Date().toISOString()
       });
-      setIsAddingStaff(false);
       toast.success('Integrante agregado correctamente');
     } catch (err) {
       console.error("Error adding staff member:", err);
@@ -5134,6 +5532,7 @@ function PayrollView({
     const formData = new FormData(e.currentTarget);
     
     try {
+      setEditingStaff(null);
       await updateDoc(doc(db, 'staff', editingStaff.id), {
         name: formData.get('name') as string,
         role: formData.get('role') as string,
@@ -5141,7 +5540,6 @@ function PayrollView({
         email: formData.get('email') as string,
         baseSalaryUSD: Number(formData.get('baseSalaryUSD')),
       });
-      setEditingStaff(null);
       toast.success('Integrante actualizado correctamente');
     } catch (err) {
       console.error("Error updating staff member:", err);
@@ -5159,6 +5557,7 @@ function PayrollView({
     const paymentMethod = formData.get('paymentMethod') as PaymentMethod;
 
     try {
+      setIsPayingStaff(null);
       // 1. Record Payroll Payment
       await addDoc(collection(db, 'payroll'), {
         companyId: userProfile.companyId,
@@ -5183,7 +5582,6 @@ function PayrollView({
         createdAt: new Date().toISOString()
       });
 
-      setIsPayingStaff(null);
       toast.success('Pago de payroll procesado correctamente');
     } catch (err) {
       console.error("Error processing payroll:", err);
@@ -5963,6 +6361,7 @@ function SettingsView({
     
     setIsSaving(true);
     try {
+      setIsAddingUser(false);
       const token = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
       const expiresAt = new Date();
       expiresAt.setDate(expiresAt.getDate() + 7); // 7 days expiry
@@ -5985,10 +6384,15 @@ function SettingsView({
       toast.success(`Invitación generada para ${newEmail}`);
       
       // Copy to clipboard automatically or show a modal
-      navigator.clipboard.writeText(inviteUrl);
-      toast.info("Link de invitación copiado al portapapeles. Envíalo al usuario para que se una.");
+      try {
+        if (navigator.clipboard) {
+          await navigator.clipboard.writeText(inviteUrl);
+          toast.info("Link de invitación copiado al portapapeles. Envíalo al usuario para que se una.");
+        }
+      } catch (clipErr) {
+        console.warn("Clipboard access denied or failed:", clipErr);
+      }
       
-      setIsAddingUser(false);
       setNewEmail('');
     } catch (err) {
       console.error("Error adding user:", err);
@@ -6489,8 +6893,8 @@ function SettingsView({
                   <option value="viewer">Visualizador</option>
                 </select>
               </div>
-              <Button type="submit" className="w-full py-4">
-                Enviar Invitación
+              <Button type="submit" className="w-full py-4" disabled={isSaving}>
+                {isSaving ? 'Generando...' : 'Enviar Invitación'}
               </Button>
             </form>
           </Card>

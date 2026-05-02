@@ -28,8 +28,8 @@ service cloud.firestore {
     // Collection: commissions
     // Fields: companyId, staffId, staffName, clientId, clientName, paymentId, amountUSD, percentage, staffRole, status, date, createdAt
     //
-    // Collection: settings
-    // Fields: companyId, currency, decimals, theme, paymentMethods, updatedAt, payrollDay, defaultSetterCommissionPct, defaultCloserCommissionPct
+    // Collection: invitations
+    // Fields: email, companyId, role, token, status, invitedBy, createdAt, expiresAt
     // ===============================================================
 
     // Helper Functions
@@ -81,7 +81,13 @@ service cloud.firestore {
     function isValidCompany(data) {
       return hasRequiredFields(['name', 'ownerId', 'createdAt']) &&
              data.name is string && data.name.size() > 0 &&
-             data.ownerId == request.auth.uid;
+             data.ownerId == request.auth.uid &&
+             (!('email' in data) || data.email is string) &&
+             (!('phone' in data) || data.phone is string) &&
+             (!('taxId' in data) || data.taxId is string) &&
+             (!('address' in data) || data.address is string) &&
+             (!('tradeName' in data) || data.tradeName is string) &&
+             (!('logoUrl' in data) || data.logoUrl is string);
     }
 
     function isValidUserProfile(data) {
@@ -146,7 +152,18 @@ service cloud.firestore {
              data.companyId == getCompanyId() &&
              data.currency in ['USD', 'ARS', 'EUR'] &&
              data.decimals is number && data.decimals >= 0 && data.decimals <= 2 &&
-             data.paymentMethods is list;
+             data.paymentMethods is list &&
+             (!('payrollDay' in data) || data.payrollDay is number) &&
+             (!('defaultSetterCommissionPct' in data) || data.defaultSetterCommissionPct is number) &&
+             (!('defaultCloserCommissionPct' in data) || data.defaultCloserCommissionPct is number);
+    }
+
+    function isValidInvitation(data) {
+      return hasRequiredFields(['email', 'companyId', 'role', 'token', 'status', 'invitedBy', 'createdAt', 'expiresAt']) &&
+             data.role in ['admin', 'editor', 'viewer'] &&
+             data.status in ['pending', 'accepted', 'expired'] &&
+             data.email is string &&
+             data.token is string;
     }
 
     match /companies/{companyId} {
@@ -209,6 +226,13 @@ service cloud.firestore {
       allow read: if isAuthenticated() && (request.auth.uid == userId || isCompanyMember(resource.data.companyId));
       allow create, update: if isAuthenticated() && isAuthorized(request.resource.data.companyId) && isEditor() && isValidSettings(request.resource.data);
       allow delete: if isAuthenticated() && isAuthorized(resource.data.companyId) && isAdmin();
+    }
+
+    match /invitations/{invitationId} {
+      allow read: if true; // Allow checking token before login
+      allow create: if isAuthenticated() && isAdmin() && isValidInvitation(request.resource.data) && request.resource.data.companyId == getCompanyId();
+      allow update: if (isAuthenticated() && isAdmin()) || (request.resource.data.status == 'accepted' && resource.data.status == 'pending');
+      allow delete: if isAuthenticated() && isAdmin();
     }
   }
 }
