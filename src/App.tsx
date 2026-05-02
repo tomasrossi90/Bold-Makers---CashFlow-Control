@@ -70,7 +70,8 @@ import {
   LayoutList,
   Table2,
   Maximize2,
-  Minimize2
+  Minimize2,
+  ArrowDownAz
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
@@ -4445,6 +4446,7 @@ function AccountingSpreadsheetView({
   const [sheetSearchTerm, setSheetSearchTerm] = useState('');
   const [localSearch, setLocalSearch] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
+  const [rowSort, setRowSort] = useState<'alpha' | 'newest' | 'oldest'>('alpha');
   const [isFullScreen, setIsFullScreen] = useState(false);
   
   // Define columns: Wide range around current date
@@ -4487,11 +4489,37 @@ function AccountingSpreadsheetView({
       target[key][monthKey].push(entry);
     });
 
-    return { 
-      income: Object.keys(incomeRows).sort().reduce((obj: any, key) => { obj[key] = incomeRows[key]; return obj; }, {}), 
-      expense: Object.keys(expenseRows).sort().reduce((obj: any, key) => { obj[key] = expenseRows[key]; return obj; }, {})
+    const getGroupDate = (group: { [month: string]: CashflowEntry[] }, type: 'newest' | 'oldest') => {
+      let resultDate = type === 'newest' ? '0000-00-00' : '9999-99-99';
+      Object.values(group).forEach(monthEntries => {
+        monthEntries.forEach(entry => {
+          if (type === 'newest') {
+            if (entry.date > resultDate) resultDate = entry.date;
+          } else {
+            if (entry.date < resultDate) resultDate = entry.date;
+          }
+        });
+      });
+      return resultDate;
     };
-  }, [cashflow, localSearch, selectedCategory]);
+
+    const sortKeys = (data: { [key: string]: any }) => {
+      return Object.keys(data).sort((a, b) => {
+        if (rowSort === 'alpha') return a.localeCompare(b);
+        
+        const dateA = getGroupDate(data[a], rowSort === 'newest' ? 'newest' : 'oldest');
+        const dateB = getGroupDate(data[b], rowSort === 'newest' ? 'newest' : 'oldest');
+        
+        if (rowSort === 'newest') return dateB.localeCompare(dateA);
+        return dateA.localeCompare(dateB);
+      });
+    };
+
+    return { 
+      income: sortKeys(incomeRows).reduce((obj: any, key) => { obj[key] = incomeRows[key]; return obj; }, {}), 
+      expense: sortKeys(expenseRows).reduce((obj: any, key) => { obj[key] = expenseRows[key]; return obj; }, {})
+    };
+  }, [cashflow, localSearch, selectedCategory, rowSort]);
 
   const categories = useMemo(() => {
     const cats = new Set(cashflow.map(e => e.category));
@@ -4585,80 +4613,104 @@ function AccountingSpreadsheetView({
     return result;
   }, [cashflow, months]);
 
-  const TableHeader = () => (
-    <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 p-4 border-b border-slate-100 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-900/80 backdrop-blur-sm sticky top-0 z-[50]">
-      <div className="flex items-center gap-3">
-        <div className="p-2 bg-primary/10 rounded-xl">
-          <FileSpreadsheet className="w-5 h-5 text-primary" />
-        </div>
-        <div>
-          <h3 className="font-black text-primary uppercase italic tracking-tight">Planilla de Cashflow</h3>
-          <p className="text-[10px] text-primary/40 dark:text-slate-500 font-bold uppercase tracking-widest">Control General y Proyecciones</p>
-        </div>
-      </div>
-      
-      <div className="flex flex-wrap items-center gap-2">
-        <div className="flex items-center gap-2 mr-2 border-r border-slate-200 dark:border-slate-800 pr-4">
-          <Filter className="w-3 h-3 text-primary/30" />
-          <select 
-            value={selectedCategory}
-            onChange={(e) => setSelectedCategory(e.target.value)}
-            className="bg-transparent text-[10px] font-black uppercase tracking-widest text-primary focus:outline-none cursor-pointer"
-          >
-            <option value="all">TODAS LAS CATEGORÍAS</option>
-            {categories.filter(c => c !== 'all').map(cat => (
-              <option key={cat} value={cat}>{cat}</option>
-            ))}
-          </select>
-        </div>
-
-        <div className="relative group">
-          <Search 
-            className="absolute left-3 top-1/2 -translate-y-1/2 w-3 h-3 text-primary/30 cursor-pointer hover:text-primary transition-colors z-10" 
-            onClick={() => setLocalSearch(sheetSearchTerm)}
-          />
-          <input 
-            type="text"
-            placeholder="Buscar..."
-            value={sheetSearchTerm}
-            onChange={(e) => setSheetSearchTerm(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') {
-                setLocalSearch(sheetSearchTerm);
-                e.currentTarget.blur();
-              }
-            }}
-            className="pl-8 pr-4 py-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs focus:ring-2 focus:ring-primary/20 transition-all w-full md:w-64 font-medium"
-          />
-          {sheetSearchTerm !== localSearch && (
-            <div className="absolute top-full mt-1 left-0 right-0 bg-secondary/10 text-[8px] font-black uppercase tracking-widest text-secondary px-2 py-0.5 rounded-b-lg text-center animate-pulse z-10">
-              Presiona Enter para filtrar
-            </div>
-          )}
-        </div>
-        <button 
-          onClick={() => setIsFullScreen(!isFullScreen)}
-          className="p-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-primary/60 hover:text-primary transition-all shadow-sm"
-          title={isFullScreen ? "Salir de pantalla completa" : "Pantalla completa"}
-        >
-          {isFullScreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
-        </button>
-      </div>
-    </div>
-  );
-
   const content = (
     <Card className={cn(
       "p-0 overflow-hidden border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 flex flex-col",
-      isFullScreen ? "fixed inset-0 z-[60] rounded-none" : "bento-card shadow-2xl"
+      isFullScreen ? "fixed inset-0 z-[60] rounded-none h-screen" : "bento-card shadow-2xl"
     )}>
-      <TableHeader />
-      
-      <div className="overflow-x-auto flex-1 scrollbar-thin scrollbar-thumb-primary/10">
-        <table className="w-full text-[10px] border-collapse min-w-[2000px]">
-          <thead className="sticky top-[73px] z-30">
+      <div className={cn(
+        "overflow-auto flex-1 scrollbar-thin scrollbar-thumb-primary/10",
+        isFullScreen && "bg-white dark:bg-slate-950"
+      )}>
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 p-4 border-b border-slate-100 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-900/80 backdrop-blur-sm sticky top-0 z-[100]">
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-primary/10 rounded-xl">
+              <FileSpreadsheet className="w-5 h-5 text-primary" />
+            </div>
+            <div>
+              <h3 className="font-black text-primary uppercase italic tracking-tight">Planilla de Cashflow</h3>
+              <p className="text-[10px] text-primary/40 dark:text-slate-500 font-bold uppercase tracking-widest">Control General y Proyecciones</p>
+            </div>
+          </div>
+          
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="flex items-center gap-2 mr-2 border-r border-slate-200 dark:border-slate-800 pr-4">
+              <Filter className="w-3 h-3 text-primary/30" />
+              <select 
+                value={selectedCategory}
+                onChange={(e) => setSelectedCategory(e.target.value)}
+                className="bg-transparent text-[10px] font-black uppercase tracking-widest text-primary focus:outline-none cursor-pointer"
+              >
+                <option value="all">TODAS LAS CATEGORÍAS</option>
+                {categories.filter(c => c !== 'all').map(cat => (
+                  <option key={cat} value={cat}>{cat}</option>
+                ))}
+              </select>
+            </div>
+
+            <div className="relative group">
+              <Search 
+                className="absolute left-3 top-1/2 -translate-y-1/2 w-3 h-3 text-primary/30 cursor-pointer hover:text-primary transition-colors z-10" 
+                onClick={() => setLocalSearch(sheetSearchTerm)}
+              />
+              <input 
+                type="text"
+                placeholder="Buscar..."
+                value={sheetSearchTerm}
+                onChange={(e) => setSheetSearchTerm(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    setLocalSearch(sheetSearchTerm);
+                    e.currentTarget.blur();
+                  }
+                }}
+                className="pl-8 pr-4 py-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs focus:ring-2 focus:ring-primary/20 transition-all w-full md:w-64 font-medium"
+              />
+              {sheetSearchTerm !== localSearch && (
+                <div className="absolute top-full mt-1 left-0 right-0 bg-secondary/10 text-[8px] font-black uppercase tracking-widest text-secondary px-2 py-0.5 rounded-b-lg text-center animate-pulse z-10">
+                  Presiona Enter para filtrar
+                </div>
+              )}
+            </div>
+            <button 
+              onClick={() => setIsFullScreen(!isFullScreen)}
+              className="p-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-primary/60 hover:text-primary transition-all shadow-sm"
+              title={isFullScreen ? "Salir de pantalla completa" : "Pantalla completa"}
+            >
+              {isFullScreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
+            </button>
+          </div>
+        </div>
+        <table className="w-full text-[10px] border-collapse min-w-[2000px] table-fixed">
+          <thead className="sticky top-[73px] z-[90] shadow-sm">
             <tr className="bg-slate-100 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800">
-              <th className="px-4 py-3 text-left font-black text-primary/60 dark:text-slate-400 uppercase tracking-tighter border-r border-slate-200 dark:border-slate-800 sticky left-0 bg-slate-100 dark:bg-slate-900 z-40 w-[220px]">Detalle</th>
+              <th className="px-4 py-3 text-left font-black text-primary/60 dark:text-slate-400 uppercase tracking-tighter border-r border-slate-200 dark:border-slate-800 sticky left-0 bg-slate-100 dark:bg-slate-900 z-[91] w-[220px]">
+                <div className="flex items-center justify-between group/header">
+                  <span>Detalle</span>
+                  <div className="flex items-center gap-1 opacity-0 group-hover/header:opacity-100 transition-opacity">
+                    <button 
+                      onClick={() => setRowSort(prev => prev === 'newest' ? 'oldest' : 'newest')}
+                      className={cn(
+                        "p-1 rounded hover:bg-white dark:hover:bg-slate-800 transition-colors",
+                        (rowSort === 'newest' || rowSort === 'oldest') ? "text-secondary" : "text-primary/20"
+                      )}
+                      title={rowSort === 'newest' ? "Orden: Más recientes primero" : "Orden: Más antiguos primero"}
+                    >
+                      <Calendar className="w-3 h-3" />
+                    </button>
+                    <button 
+                      onClick={() => setRowSort('alpha')}
+                      className={cn(
+                        "p-1 rounded hover:bg-white dark:hover:bg-slate-800 transition-colors",
+                        rowSort === 'alpha' ? "text-secondary" : "text-primary/20"
+                      )}
+                      title="Orden: Alfabético"
+                    >
+                      <ArrowDownAz className="w-3 h-3" />
+                    </button>
+                  </div>
+                </div>
+              </th>
               {months.map(m => (
                 <th key={format(m, 'yyyy-MM')} className="px-2 py-3 text-center border-r border-slate-200 dark:border-slate-800 min-w-[100px]">
                   <div className="flex flex-col">
@@ -4668,21 +4720,51 @@ function AccountingSpreadsheetView({
                 </th>
               ))}
             </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-            {/* EGRESOS TOTALES HEADER */}
-            <tr className="bg-red-500/10 dark:bg-red-950/40 sticky top-[121px] z-20">
-              <td className="px-4 py-2 font-black text-red-600 uppercase tracking-tight sticky left-0 bg-red-100 dark:bg-red-950 z-10 border-r border-red-200 dark:border-red-900">EGRESOS TOTALES</td>
+
+            {/* STICKY SUMMARY ROWS */}
+            <tr className="bg-emerald-500/5 dark:bg-emerald-500/10 border-b border-emerald-500/10 sticky top-[112px] z-[80] shadow-sm">
+              <td className="px-4 py-2 font-black text-emerald-600 dark:text-emerald-400 uppercase italic sticky left-0 bg-emerald-50 dark:bg-emerald-950/80 backdrop-blur-md z-[81] border-r border-emerald-500/10">INGRESOS TOTALES</td>
+              {months.map(m => {
+                const key = format(m, 'yyyy-MM');
+                const val = totalsPerMonth[key]?.income || 0;
+                return <td key={key} className="px-2 py-2 text-right font-black text-emerald-600 border-r border-emerald-500/10">{val > 0 ? `${formatCurrency(val)}` : '-'}</td>;
+              })}
+            </tr>
+            <tr className="bg-red-500/5 dark:bg-red-500/10 border-b border-red-500/10 sticky top-[141px] z-[80] shadow-sm">
+              <td className="px-4 py-2 font-black text-red-600 dark:text-red-400 uppercase italic sticky left-0 bg-red-50 dark:bg-red-950/80 backdrop-blur-md z-[81] border-r border-red-500/10">EGRESOS TOTALES</td>
               {months.map(m => {
                 const key = format(m, 'yyyy-MM');
                 const val = totalsPerMonth[key]?.expense || 0;
+                return <td key={key} className="px-2 py-2 text-right font-black text-red-600 border-r border-red-500/10">{val > 0 ? `(${formatCurrency(val)})` : '-'}</td>;
+              })}
+            </tr>
+            <tr className="bg-primary/5 dark:bg-primary/20 border-b border-primary/10 sticky top-[170px] z-[80] shadow-sm">
+              <td className="px-4 py-2 font-black text-primary dark:text-white uppercase italic sticky left-0 bg-primary/10 dark:bg-slate-900/90 backdrop-blur-md z-[81] border-r border-primary/10">UTILIDAD MENSUAL</td>
+              {months.map(m => {
+                const key = format(m, 'yyyy-MM');
+                const income = totalsPerMonth[key]?.income || 0;
+                const expense = totalsPerMonth[key]?.expense || 0;
+                const profit = income - expense;
+                return <td key={key} className={cn("px-2 py-2 text-right font-black border-r border-primary/10", profit >= 0 ? "text-emerald-600" : "text-red-600")}>{formatCurrency(profit)}</td>;
+              })}
+            </tr>
+            <tr className="bg-secondary/5 dark:bg-secondary/10 border-b border-secondary/20 sticky top-[199px] z-[80] shadow-md">
+              <td className="px-4 py-2 font-black text-secondary uppercase italic sticky left-0 bg-white dark:bg-slate-900/90 backdrop-blur-md z-[81] border-r border-secondary/20">PROFIT %</td>
+              {months.map(m => {
+                const key = format(m, 'yyyy-MM');
+                const income = totalsPerMonth[key]?.income || 0;
+                const expense = totalsPerMonth[key]?.expense || 0;
+                const margin = income > 0 ? ((income - expense) / income) * 100 : 0;
                 return (
-                  <td key={key} className="px-2 py-2 text-right font-black text-red-600 bg-red-50/30 dark:bg-red-900/10 border-r border-red-100 dark:border-red-900/30">
-                    {val > 0 ? `-${Math.round(val)}USD` : '-'}
+                  <td key={key} className={cn("px-2 py-2 text-right font-black border-r border-secondary/20", margin >= 0 ? "text-emerald-600" : "text-red-600")}>
+                    {margin.toFixed(1)}%
                   </td>
                 );
               })}
             </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+            {/* Removed duplicated aggregate headers since they are now sticky top rows */}
             
             {Object.keys(rows.expense).map(detail => (
               <tr key={detail} className="hover:bg-slate-50 dark:hover:bg-slate-900/50 transition-colors group">
@@ -4724,19 +4806,7 @@ function AccountingSpreadsheetView({
               {months.map(m => <td key={format(m, 'yyyy-MM')} className="border-r border-slate-100 dark:border-slate-800"></td>)}
             </tr>
 
-            {/* INGRESOS TOTALES HEADER */}
-            <tr className="bg-green-500/10 dark:bg-green-950/40">
-              <td className="px-4 py-2 font-black text-green-600 uppercase tracking-tight sticky left-0 bg-green-100 dark:bg-green-950 z-10 border-r border-green-200 dark:border-green-900">INGRESOS TOTALES</td>
-              {months.map(m => {
-                const key = format(m, 'yyyy-MM');
-                const val = totalsPerMonth[key]?.income || 0;
-                return (
-                  <td key={key} className="px-2 py-2 text-right font-black text-green-600 bg-green-50/30 dark:bg-green-900/10 border-r border-green-100 dark:border-green-900/30">
-                    {val > 0 ? `${Math.round(val)}USD` : '-'}
-                  </td>
-                );
-              })}
-            </tr>
+            {/* Removed income header row since it is now sticky at top */}
 
             {Object.keys(rows.income).map(detail => (
               <tr key={detail} className="hover:bg-slate-50 dark:hover:bg-slate-900/50 transition-colors group">
@@ -5745,6 +5815,25 @@ function PayrollView({
     }
   };
 
+  const [isGroupingPayroll, setIsGroupingPayroll] = useState(true);
+
+  const groupedPayroll = useMemo(() => {
+    const groups: { [key: string]: { staffName: string; staffId: string; total: number; payments: PayrollPayment[]; lastPayment: string } } = {};
+    
+    payroll.forEach(p => {
+      if (!groups[p.staffId]) {
+        groups[p.staffId] = { staffName: p.staffName, staffId: p.staffId, total: 0, payments: [], lastPayment: p.date };
+      }
+      groups[p.staffId].total += p.amountUSD;
+      groups[p.staffId].payments.push(p);
+      if (p.date > groups[p.staffId].lastPayment) {
+        groups[p.staffId].lastPayment = p.date;
+      }
+    });
+    
+    return Object.values(groups).sort((a, b) => b.lastPayment.localeCompare(a.lastPayment));
+  }, [payroll]);
+
   return (
     <>
       <div className="space-y-8">
@@ -6144,24 +6233,85 @@ function PayrollView({
 
       {activeSubTab === 'salaries' && (
         <div className="space-y-4 pt-8 border-t border-primary/5 dark:border-slate-700">
-          <h3 className="text-lg font-black text-primary dark:text-secondary uppercase italic tracking-tight mb-4">Historial de <span className="text-secondary dark:text-tertiary">Pagos de Sueldo</span></h3>
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4">
+            <h3 className="text-lg font-black text-primary dark:text-secondary uppercase italic tracking-tight">Historial de <span className="text-secondary dark:text-tertiary">Pagos de Sueldo</span></h3>
+            <div className="flex bg-neutral/50 dark:bg-slate-800 p-1 rounded-xl border border-primary/5 dark:border-slate-700 w-fit">
+              <button 
+                onClick={() => setIsGroupingPayroll(true)}
+                className={cn(
+                  "px-3 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all",
+                  isGroupingPayroll ? "bg-white dark:bg-slate-700 text-primary shadow-sm" : "text-primary/40"
+                )}
+              >
+                Agrupado
+              </button>
+              <button 
+                onClick={() => setIsGroupingPayroll(false)}
+                className={cn(
+                  "px-3 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest transition-all",
+                  !isGroupingPayroll ? "bg-white dark:bg-slate-700 text-primary shadow-sm" : "text-primary/40"
+                )}
+              >
+                Individual
+              </button>
+            </div>
+          </div>
+
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {payroll.slice(0, 12).map(p => (
-              <Card key={p.id} className="p-4 border-none shadow-sm bg-white dark:bg-slate-800/30">
-                <div className="flex justify-between items-start">
-                  <div>
-                    <p className="text-xs font-black text-primary dark:text-secondary tracking-tight">{p.staffName}</p>
-                    <p className="text-[9px] font-bold text-primary/40 dark:text-primary/60 uppercase">{p.period}</p>
+            {isGroupingPayroll ? (
+              groupedPayroll.map(group => (
+                <Card key={group.staffId} className="p-5 border-none shadow-sm bg-white dark:bg-slate-800/30 group/card">
+                  <div className="flex justify-between items-start mb-4">
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 bg-primary/5 rounded-lg flex items-center justify-center font-black text-primary text-xs">
+                        {group.staffName.charAt(0)}
+                      </div>
+                      <div>
+                        <p className="text-sm font-black text-primary dark:text-secondary tracking-tight">{group.staffName}</p>
+                        <p className="text-[9px] font-bold text-primary/40 dark:text-primary/60 uppercase">{group.payments.length} pagos realizados</p>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-lg font-black text-red-600 italic">-{formatCurrency(group.total)}</p>
+                      <p className="text-[8px] font-black text-secondary uppercase tracking-widest">Total Acumulado</p>
+                    </div>
                   </div>
-                  <p className="text-sm font-black text-red-600 italic">-{formatCurrency(p.amountUSD)}</p>
-                </div>
-                <div className="flex items-center justify-between mt-2">
-                  <span className="text-[8px] font-black text-secondary dark:text-primary uppercase tracking-widest">{p.paymentMethod}</span>
-                  <span className="text-[8px] font-bold text-primary/30 dark:text-primary/50">{format(parseISO(p.date), 'dd/MM/yyyy')}</span>
-                </div>
-              </Card>
-            ))}
-            {payroll.length === 0 && (
+                  <div className="pt-3 border-t border-primary/5 flex items-center justify-between">
+                    <div className="flex -space-x-2">
+                       {group.payments.slice(0, 3).map((p, i) => (
+                         <div key={p.id} className="w-5 h-5 rounded-full bg-primary/10 border border-white dark:border-slate-800 flex items-center justify-center text-[7px] font-black" title={p.period}>
+                           {i + 1}
+                         </div>
+                       ))}
+                       {group.payments.length > 3 && (
+                         <div className="w-5 h-5 rounded-full bg-slate-100 flex items-center justify-center text-[7px] font-black text-slate-400">
+                           +{group.payments.length - 3}
+                         </div>
+                       )}
+                    </div>
+                    <span className="text-[8px] font-bold text-primary/30">Último: {format(parseISO(group.lastPayment), 'dd/MM/yyyy')}</span>
+                  </div>
+                </Card>
+              ))
+            ) : (
+              payroll.slice(0, 12).map(p => (
+                <Card key={p.id} className="p-4 border-none shadow-sm bg-white dark:bg-slate-800/30">
+                  <div className="flex justify-between items-start">
+                    <div>
+                      <p className="text-xs font-black text-primary dark:text-secondary tracking-tight">{p.staffName}</p>
+                      <p className="text-[9px] font-bold text-primary/40 dark:text-primary/60 uppercase">{p.period}</p>
+                    </div>
+                    <p className="text-sm font-black text-red-600 italic">-{formatCurrency(p.amountUSD)}</p>
+                  </div>
+                  <div className="flex items-center justify-between mt-2">
+                    <span className="text-[8px] font-black text-secondary dark:text-primary uppercase tracking-widest">{p.paymentMethod}</span>
+                    <span className="text-[8px] font-bold text-primary/30 dark:text-primary/50">{format(parseISO(p.date), 'dd/MM/yyyy')}</span>
+                  </div>
+                </Card>
+              ))
+            )}
+            
+            {(isGroupingPayroll ? groupedPayroll.length === 0 : payroll.length === 0) && (
               <p className="text-xs text-primary/30 dark:text-primary/50 italic text-center py-8 col-span-full">No hay pagos registrados.</p>
             )}
           </div>
